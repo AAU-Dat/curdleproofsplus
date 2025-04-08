@@ -73,6 +73,22 @@ pub fn inner_product(a: &[Fr], b: &[Fr]) -> Fr {
     c
 }
 
+pub fn weighted_inner_product(a: &[Fr], b: &[Fr], y: Fr) -> Fr {
+    assert_eq!(
+        a.len(),
+        b.len(),
+        "weigted_inner_product(a,b): lengths of vectors do not match"
+    );
+    let mut y_power = y;
+    let mut c = Fr::zero();
+    for i in 0..a.len() {
+        c += a[i] * b[i] * y_power;
+        y_power *= y;
+    }
+    c
+}
+
+
 /// Return `vec_a` permuted
 pub fn get_permutation<T: Copy>(vec_a: &[T], permutation: &[u32]) -> Vec<T> {
     permutation.iter().map(|i| vec_a[*i as usize]).collect()
