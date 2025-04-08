@@ -35,8 +35,10 @@ pub struct InnerProductProof {
 }
 
 pub struct WeightedInnerProductProof {
-    B_c: G1Projective,
-    B_d: G1Projective,
+    G: Vec<G1Affine>,
+    H: Vec<G1Affine>,
+    g: G1Projective,
+    h: G1Projective,
 
     vec_c_L: Vec<G1Projective>,
     vec_c_R: Vec<G1Projective>,
@@ -156,7 +158,7 @@ impl InnerProductProof {
         // Create slices backed by their respective vectors.  This lets us reslice as we compress the lengths of the
         // vectors in the main loop below.
         let mut slice_G = &mut crs_G_vec[..];
-        let mut slice_G_prime = &mut crs_G_prime_vec[..];
+        let mut slice_H = &mut crs_G_prime_vec[..];
         let mut slice_c = &mut vec_c[..];
         let mut slice_d = &mut vec_d[..];
 
@@ -166,12 +168,12 @@ impl InnerProductProof {
             let (c_L, c_R) = slice_c.split_at_mut(n);
             let (d_L, d_R) = slice_d.split_at_mut(n);
             let (G_L, G_R) = slice_G.split_at_mut(n);
-            let (G_prime_L, G_prime_R) = slice_G_prime.split_at_mut(n);
+            let (H_L, H_R) = slice_H.split_at_mut(n);
 
             let L_C = msm(G_R, c_L) + H.mul(inner_product(c_L, d_R));
-            let L_D = msm(G_prime_L, d_R);
+            let L_D = msm(H_L, d_R);
             let R_C = msm(G_L, c_R) + H.mul(inner_product(c_R, d_L));
-            let R_D = msm(G_prime_R, d_L);
+            let R_D = msm(H_R, d_L);
 
             // Append elements to the proof
             vec_L_C.push(L_C);
@@ -188,14 +190,14 @@ impl InnerProductProof {
                 c_L[i] += gamma_inv * c_R[i];
                 d_L[i] += gamma * d_R[i];
                 G_L[i] = (G_L[i] + G_R[i].mul(gamma)).into_affine();
-                G_prime_L[i] = (G_prime_L[i] + G_prime_R[i].mul(gamma_inv)).into_affine();
+                H_L[i] = (H_L[i] + H_R[i].mul(gamma_inv)).into_affine();
             }
 
             // Save the rescaled vector for splitting in the next loop
             slice_c = c_L;
             slice_d = d_L;
             slice_G = G_L;
-            slice_G_prime = G_prime_L;
+            slice_H = H_L;
         }
 
         InnerProductProof {
@@ -389,10 +391,12 @@ impl WeightedInnerProductProof {
 
         mut vec_c: Vec<Fr>,
         mut vec_d: Vec<Fr>,
-
+        y: Fr, 
+        alpha: Fr,
+        
         transcript: &mut Transcript,
         rng: &mut T,
-    ) -> InnerProductProof {
+    ) -> WeightedInnerProductProof {
         let mut n = vec_c.len();
         let lg_n = ark_std::log2(n) as usize;
         assert_eq!(vec_d.len(), n);
@@ -400,35 +404,42 @@ impl WeightedInnerProductProof {
         assert_eq!(crs_H_vec.len(), n);
         assert!(n.is_power_of_two());
 
+        // Compute powers of y
+        let y_inv = y.inverse().unwrap();
+
         let mut vec_c_L = Vec::with_capacity(lg_n);
         let mut vec_c_R = Vec::with_capacity(lg_n);
         let mut vec_d_L = Vec::with_capacity(lg_n);
         let mut vec_d_R = Vec::with_capacity(lg_n);
 
         // Step 1
+        /* 
+        We don't need blinders as bp+ is zk
         let (vec_r_c, vec_r_d) = generate_ipa_blinders(rng, &vec_c, &vec_d);
 
         let B_c = msm(&crs_G_vec, &vec_r_c);
-        let B_d = msm(&crs_H_vec, &vec_r_d);
+        let B_d = msm(&crs_H_vec, &vec_r_d); */
 
-        transcript.append_list(b"ipa_step1", &[&P, &D]);
+        transcript.append(b"ipa_step1", &P);
         transcript.append(b"ipa_step1", &z);
-        transcript.append_list(b"ipa_step1", &[&B_c, &B_d]);
-        let alpha = transcript.get_and_append_challenge(b"ipa_alpha");
-        let beta = transcript.get_and_append_challenge(b"ipa_beta");
+        transcript.append_list(b"ipa_step1", &[&crs_G_vec, &crs_H_vec]);
 
-        // Rewrite vectors c and d
-        for i in 0..n {
+        /* Not needed for bp+
+        let alpha = transcript.get_and_append_challenge(b"ipa_alpha");
+        let beta = transcript.get_and_append_challenge(b"ipa_beta"); */
+
+        // Rewrite vectors c and d (NOT NEEDED FOR BP+)
+        /* for i in 0..n {
             vec_c[i] = vec_r_c[i] + alpha * vec_c[i];
             vec_d[i] = vec_r_d[i] + alpha * vec_d[i];
         }
-        let H = crs_H.mul(beta);
+        let H = crs_H.mul(beta); */
 
         // Step 2
         // Create slices backed by their respective vectors.  This lets us reslice as we compress the lengths of the
         // vectors in the main loop below.
         let mut slice_G = &mut crs_G_vec[..];
-        let mut slice_G_prime = &mut crs_H_vec[..];
+        let mut slice_H = &mut crs_H_vec[..];
         let mut slice_c = &mut vec_c[..];
         let mut slice_d = &mut vec_d[..];
 
@@ -438,20 +449,27 @@ impl WeightedInnerProductProof {
             let (c_L, c_R) = slice_c.split_at_mut(n);
             let (d_L, d_R) = slice_d.split_at_mut(n);
             let (G_L, G_R) = slice_G.split_at_mut(n);
-            let (G_prime_L, G_prime_R) = slice_G_prime.split_at_mut(n);
+            let (H_L, H_R) = slice_H.split_at_mut(n);
 
-            let L_C = msm(G_R, c_L) + H.mul(inner_product(c_L, d_R));
-            let L_D = msm(G_prime_L, d_R);
+            /* let L_C = msm(G_R, c_L) + H.mul(inner_product(c_L, d_R));
+            let L_D = msm(H_L, d_R);
             let R_C = msm(G_L, c_R) + H.mul(inner_product(c_R, d_L));
-            let R_D = msm(G_prime_R, d_L);
+            let R_D = msm(H_R, d_L); */ 
+            let c_LL: & [ark_ff::Fp<ark_ff::MontBackend<ark_bls12_381::FrConfig, 4>, 4>] = c_L;
+            let c_RR: & [ark_ff::Fp<ark_ff::MontBackend<ark_bls12_381::FrConfig, 4>, 4>] = c_R;
+            let d_LL: & [ark_ff::Fp<ark_ff::MontBackend<ark_bls12_381::FrConfig, 4>, 4>] = d_L;
+            let d_RR: & [ark_ff::Fp<ark_ff::MontBackend<ark_bls12_381::FrConfig, 4>, 4>] = d_R;
+
+            // First compute z_L
+            let z_L = weighted_inner_product(c_L, d_R, y.clone());
 
             // Append elements to the proof
-            vec_c_L.push(L_C);
-            vec_d_L.push(L_D);
-            vec_c_R.push(R_C);
-            vec_d_R.push(R_D);
+            vec_c_L.push(c_LL);
+            vec_d_L.push(d_LL);
+            vec_c_R.push(c_RR);
+            vec_d_R.push(d_RR);
 
-            transcript.append_list(b"ipa_loop", &[&L_C, &L_D, &R_C, &R_D]);
+            transcript.append_list(b"ipa_loop", &[&c_LL, &d_LL, &c_RR, &d_RR]);
             let gamma = transcript.get_and_append_challenge(b"ipa_gamma");
             let gamma_inv = gamma.inverse().expect("gamma must have an inverse");
 
@@ -460,23 +478,23 @@ impl WeightedInnerProductProof {
                 c_L[i] += gamma_inv * c_R[i];
                 d_L[i] += gamma * d_R[i];
                 G_L[i] = (G_L[i] + G_R[i].mul(gamma)).into_affine();
-                G_prime_L[i] = (G_prime_L[i] + G_prime_R[i].mul(gamma_inv)).into_affine();
+                H_L[i] = (H_L[i] + H_R[i].mul(gamma_inv)).into_affine();
             }
 
             // Save the rescaled vector for splitting in the next loop
             slice_c = c_L;
             slice_d = d_L;
             slice_G = G_L;
-            slice_G_prime = G_prime_L;
+            slice_H = H_L;
         }
 
-        InnerProductProof {
-            B_c,
-            B_d,
-            vec_L_C: vec_c_L,
-            vec_R_C: vec_c_R,
-            vec_L_D: vec_d_L,
-            vec_R_D: vec_d_R,
+        WeightedInnerProductProof {
+            G: crs_G_vec,
+            H: crs_H_vec,
+            vec_c_L: vec_c_L,
+            vec_c_R: vec_c_R,
+            vec_d_L: vec_d_L,
+            vec_d_R: vec_d_R,
             c_final: slice_c[0],
             d_final: slice_d[0],
         }
