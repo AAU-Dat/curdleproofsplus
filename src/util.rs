@@ -73,6 +73,7 @@ pub fn inner_product(a: &[Fr], b: &[Fr]) -> Fr {
     c
 }
 
+/// Return the weighted inner product of two field vectors
 pub fn weighted_inner_product(a: &[Fr], b: &[Fr], y: Fr) -> Fr {
     assert_eq!(
         a.len(),
