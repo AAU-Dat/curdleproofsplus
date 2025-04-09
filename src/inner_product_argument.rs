@@ -6,7 +6,7 @@ use ark_ec::CurveGroup;
 use ark_ff::{batch_inversion, BigInt, Field, PrimeField};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Read, SerializationError, Write};
 use ark_std::rand::RngCore;
-use ark_std::{One, Zero};
+use ark_std::{One, UniformRand, Zero};
 use itertools::iterate;
 
 use merlin::Transcript;
@@ -462,30 +462,123 @@ impl WeightedInnerProductProof {
             let R_D = msm(H_R, d_L); */
 
             // Compute variables for z_R
-            let ynprime_c_R = (0..n)
+            let yn_c_R = (0..n)
                 .map(|i| &powers_y[n - 1] * &c_R[i])
+                .collect::<Vec<Fr>>();
+            let yninv_cL = (0..n)
+                .map(|i| &powers_y_inv[n - 1] * &c_L[i])
                 .collect::<Vec<Fr>>();
 
             // First compute z_L
             let z_L = weighted_inner_product(c_L, d_R, y.clone());
             // Compute z_R
-            let z_R = weighted_inner_product(&ynprime_c_R, d_L, y.clone());
+            let z_R = weighted_inner_product(&yn_c_R, d_L, y.clone());
 
             // Append elements to the proof
             vec_z_L.push(z_L);
             vec_z_R.push(z_R);
 
             transcript.append_list(b"ipa_loop", &[&z_L, &z_R]);
-            let gamma = transcript.get_and_append_challenge(b"ipa_gamma");
-            let gamma_inv = gamma.inverse().expect("gamma must have an inverse");
+            /*let gamma = transcript.get_and_append_challenge(b"ipa_gamma");
+            let gamma_inv = gamma.inverse().expect("gamma must have an inverse");*/
+
+            // Now we construct L
+            // Note that no element in vectors c_L and d_R can be 0
+            // since 0 is an invalid secret key!
+            // L = <yninv_cL * G_R> + <d_R * H_L> + (z_L * g) + (x_L * h)
+            let g_zL = *crs_G * z_L;
+            let x_L_Fr = Fr::rand(rng);
+            let h_x_L = *crs_H * x_L_Fr;
+            let g_zL_h_xL = g_zL + &h_x_L;
+            let yninv_cL_GR = G_R.iter().zip(yninv_cL).fold(g_zL_h_xL, |acc,x| {
+                if x.1 != Fr::zero() {
+                    let cLi = x.1;
+                    let cLi_GRi = *x.0 * cLi;
+                    acc + &cLi_GRi
+                } else {
+                    acc
+                }
+            });
+            let L = H_L.iter().zip(d_R).fold(yninv_cL_GR, |acc,x| {
+                if *x.1 != Fr::zero() {
+                    let dRi = *x.1;
+                    let dRi_HLi = *x.0 * &dRi;
+                    acc + &dRi_HLi
+                } else {
+                    acc
+                }
+            });
+
+            // Now we construct R
+            // Note that no element in vectors c_R and d_L can be 0
+            // since 0 is an invalid secret key!
+            //
+            // R = <yn_c_R * G_R> + <d_L * H_R> + (z_R * g) + (x_R * h)
+            let g_zR = *crs_G * z_R;
+            let x_R_Fr = Fr::rand(rng);
+            let h_x_R = *crs_H * x_R_Fr;
+            let g_zR_h_xR = g_zR + &h_x_R;
+            let cR_GL = G_L.iter().zip(yn_c_R.clone()).fold(g_zR_h_xR, |acc,x| {
+                if x.1 != Fr::zero() {
+                    let cRi = x.1;
+                    let cRi_GLi = *x.0 * cRi;
+                    acc + &cRi_GLi
+                } else {
+                    acc
+                }
+            });
+            let R = H_R.iter().zip(d_L).fold(cR_GL, |acc, x| {
+                if *x.1 != Fr::zero() {
+                    let cRi = *x.1;
+                    let cRi_GLi = *x.0 * &cRi;
+                    acc + &cRi_GLi
+                } else {
+                    acc
+                }
+            });
+
+            transcript.append_list(b"LR_step", &[&L, &R]);
+            let e = transcript.get_and_append_challenge(b"ipa_e");
+            let e_inv = e.inverse().expect("e must have an inverse");
+
+            let e_squared = e * e;
+            let e_inv_squared = e_squared.inverse().expect("e_squared must have an inverse");
 
             // Fold input vectors and basis
-            for i in 0..n {
+            // We make c_hat
+            let c_hat = (0..n)
+                .map(|i| {
+                    let cLe = c_L[i] * e;
+                    let cR_minuse = yn_c_R[i] * e_inv;
+                    cLe + cR_minuse
+                })
+                .collect::<Vec<Fr>>();
+            //   c = &mut c_hat[..];
+
+            // We make c_hat
+            let d_hat = (0..n)
+                .map(|i| {
+                    let dRe = d_R[i] * e;
+                    let dL_minuse = d_L[i] * e_inv;
+                    dRe + dL_minuse
+                })
+                .collect::<Vec<Fr>>();
+            //   d = &mut d_hat[..];
+
+            // Now we make alpha_hat
+            let e2_xL = e_squared * x_L_Fr;
+            let einv2_xR = e_inv_squared * x_R_Fr;
+            let e2_xL_einv2_xR = e2_xL + einv2_xR;
+            let alpha_hat = alpha + e2_xL_einv2_xR;
+
+
+
+            /*for i in 0..n {
                 c_L[i] += gamma_inv * c_R[i];
                 d_L[i] += gamma * d_R[i];
                 G_L[i] = (G_L[i] + G_R[i].mul(gamma)).into_affine();
                 H_L[i] = (H_L[i] + H_R[i].mul(gamma_inv)).into_affine();
-            }
+            }*/
 
             // Save the rescaled vector for splitting in the next loop
             slice_c = c_L;
