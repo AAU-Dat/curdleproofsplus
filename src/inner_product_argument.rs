@@ -1,6 +1,5 @@
 #![allow(non_snake_case)]
 
-use core::slice::SlicePattern;
 use std::ops::Mul;
 
 use ark_bls12_381::{Config, Fr, G1Affine, G1Projective};
@@ -39,16 +38,13 @@ pub struct InnerProductProof {
 }
 
 pub struct WeightedInnerProductProof {
-    G: Vec<G1Affine>,
-    H: Vec<G1Affine>,
-    g: G1Projective,
-    h: G1Projective,
-
     vec_L: Vec<G1Projective>,
     vec_R: Vec<G1Projective>,
-
-    c_final: Fr,
-    d_final: Fr,
+    pub a_tag: G1Projective,
+    pub b_tag: G1Projective,
+    pub r_prime: Fr,
+    pub s_prime: Fr,
+    pub delta_prime: Fr,
 }
 
 /// Generate two blinder vectors `r` and `z` that satisfy the following constraints:
@@ -415,8 +411,8 @@ impl WeightedInnerProductProof {
             .take(n)
             .collect::<Vec<Fr>>();
 
-        let mut vec_z_L = Vec::with_capacity(lg_n);
-        let mut vec_z_R = Vec::with_capacity(lg_n);
+        let mut vec_L = Vec::with_capacity(lg_n);
+        let mut vec_R = Vec::with_capacity(lg_n);
 
         // Step 1
         /* 
@@ -475,11 +471,6 @@ impl WeightedInnerProductProof {
             // Compute z_R
             let z_R = weighted_inner_product(&yn_c_R, d_L, y.clone());
 
-            // Append elements to the proof
-            vec_z_L.push(z_L);
-            vec_z_R.push(z_R);
-
-            transcript.append_list(b"ipa_loop", &[&z_L, &z_R]);
             /*let gamma = transcript.get_and_append_challenge(b"ipa_gamma");
             let gamma_inv = gamma.inverse().expect("gamma must have an inverse");*/
 
@@ -537,6 +528,10 @@ impl WeightedInnerProductProof {
                     acc
                 }
             });
+
+            // Append elements to the proof
+            vec_L.push(L);
+            vec_R.push(R);
 
             transcript.append_list(b"LR_step", &[&L, &R]);
             let e = transcript.get_and_append_challenge(b"ipa_e");
@@ -598,15 +593,57 @@ impl WeightedInnerProductProof {
             slice_H = &mut H_hat.as_slice();
         }
 
+        // n should now be equal to 1, and every vector should therefore have length 1
+        let r = Fr::rand(rng);
+        let s = Fr::rand(rng);
+        let delta = Fr::rand(rng);
+        let eta = Fr::rand(rng);
+
+        // Now we compute A
+        let Gr: G1Projective = slice_G[0] * r;
+        let Hs: G1Projective = slice_H[0] * s;
+        let c_s = slice_c[0] * s;
+        let c_sy = c_s*y;
+        let d_r = slice_d[0] * r;
+        let d_ry = d_r * y;
+        let c_sy_d_ry = c_sy + d_ry;
+        let g_c_sy_d_ry: G1Projective = *crs_G * c_sy_d_ry;
+        let h_delta: G1Projective = *crs_H * delta;
+        let A: G1Projective = Gr + Hs + g_c_sy_d_ry + h_delta;
+
+        // Now we compute B
+        let r_s = r * s;
+        let r_sy = y * r_s;
+        let g_r_sy: G1Projective = *crs_G * r_sy;
+        let h_eta: G1Projective = *crs_H * eta;
+        let B: G1Projective = g_r_sy + h_eta;
+
+
+        transcript.append_list(b"final_A_and_B_step", &[&A, &B]);
+        // compute challenge ee
+        let ee = transcript.get_and_append_challenge(b"final_e");
+        let ee_inv = ee.inverse().expect("ee must have an inverse");
+        let ee_squared = ee * ee;
+
+        // compute r_prime, s_prime, delta_prime
+        let cee = slice_c[0] * ee;
+        let dee = slice_d[0] * ee;
+        let r_prime = r + cee;
+        let s_prime = s + dee;
+
+        let deltaee = delta * ee;
+        let alpha_ee2 = alpha * ee_squared;
+        let deltaee_alpha_ee2 = deltaee + alpha_ee2;
+        let delta_prime = eta + deltaee_alpha_ee2;
+
         WeightedInnerProductProof {
-            G: crs_G_vec,
-            H: crs_H_vec,
-            g: *crs_G,
-            h: *crs_H,
-            vec_L: L,
-            vec_R: R,
-            c_final: slice_c[0],
-            d_final: slice_d[0],
+            vec_L,
+            vec_R,
+            a_tag: A,
+            b_tag: B,
+            r_prime,
+            s_prime,
+            delta_prime
         }
     }
 
