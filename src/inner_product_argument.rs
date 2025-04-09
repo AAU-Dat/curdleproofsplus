@@ -7,6 +7,7 @@ use ark_ff::{batch_inversion, BigInt, Field, PrimeField};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Read, SerializationError, Write};
 use ark_std::rand::RngCore;
 use ark_std::{One, Zero};
+use itertools::iterate;
 
 use merlin::Transcript;
 
@@ -406,11 +407,15 @@ impl WeightedInnerProductProof {
 
         // Compute powers of y
         let y_inv = y.inverse().unwrap();
+        let powers_y = iterate(y.clone(), |i| i.clone() * y)
+            .take(n)
+            .collect::<Vec<Fr>>();
+        let powers_y_inv = iterate(y_inv.clone(), |i| i.clone() * y_inv.clone())
+            .take(n)
+            .collect::<Vec<Fr>>();
 
-        let mut vec_c_L = Vec::with_capacity(lg_n);
-        let mut vec_c_R = Vec::with_capacity(lg_n);
-        let mut vec_d_L = Vec::with_capacity(lg_n);
-        let mut vec_d_R = Vec::with_capacity(lg_n);
+        let mut vec_z_L = Vec::with_capacity(lg_n);
+        let mut vec_z_R = Vec::with_capacity(lg_n);
 
         // Step 1
         /* 
@@ -454,22 +459,23 @@ impl WeightedInnerProductProof {
             /* let L_C = msm(G_R, c_L) + H.mul(inner_product(c_L, d_R));
             let L_D = msm(H_L, d_R);
             let R_C = msm(G_L, c_R) + H.mul(inner_product(c_R, d_L));
-            let R_D = msm(H_R, d_L); */ 
-            let c_LL: & [ark_ff::Fp<ark_ff::MontBackend<ark_bls12_381::FrConfig, 4>, 4>] = c_L;
-            let c_RR: & [ark_ff::Fp<ark_ff::MontBackend<ark_bls12_381::FrConfig, 4>, 4>] = c_R;
-            let d_LL: & [ark_ff::Fp<ark_ff::MontBackend<ark_bls12_381::FrConfig, 4>, 4>] = d_L;
-            let d_RR: & [ark_ff::Fp<ark_ff::MontBackend<ark_bls12_381::FrConfig, 4>, 4>] = d_R;
+            let R_D = msm(H_R, d_L); */
+
+            // Compute variables for z_R
+            let ynprime_c_R = (0..n)
+                .map(|i| &powers_y[n - 1] * &c_R[i])
+                .collect::<Vec<Fr>>();
 
             // First compute z_L
             let z_L = weighted_inner_product(c_L, d_R, y.clone());
+            // Compute z_R
+            let z_R = weighted_inner_product(&ynprime_c_R, d_L, y.clone());
 
             // Append elements to the proof
-            vec_c_L.push(c_LL);
-            vec_d_L.push(d_LL);
-            vec_c_R.push(c_RR);
-            vec_d_R.push(d_RR);
+            vec_z_L.push(z_L);
+            vec_z_R.push(z_R);
 
-            transcript.append_list(b"ipa_loop", &[&c_LL, &d_LL, &c_RR, &d_RR]);
+            transcript.append_list(b"ipa_loop", &[&z_L, &z_R]);
             let gamma = transcript.get_and_append_challenge(b"ipa_gamma");
             let gamma_inv = gamma.inverse().expect("gamma must have an inverse");
 
