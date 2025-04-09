@@ -1,8 +1,11 @@
 #![allow(non_snake_case)]
+
+use core::slice::SlicePattern;
 use std::ops::Mul;
 
-use ark_bls12_381::{Fr, G1Affine, G1Projective};
+use ark_bls12_381::{Config, Fr, G1Affine, G1Projective};
 use ark_ec::CurveGroup;
+use ark_ec::short_weierstrass::Projective;
 use ark_ff::{batch_inversion, BigInt, Field, PrimeField};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Read, SerializationError, Write};
 use ark_std::rand::RngCore;
@@ -41,10 +44,8 @@ pub struct WeightedInnerProductProof {
     g: G1Projective,
     h: G1Projective,
 
-    vec_c_L: Vec<G1Projective>,
-    vec_c_R: Vec<G1Projective>,
-    vec_d_L: Vec<G1Projective>,
-    vec_d_R: Vec<G1Projective>,
+    vec_L: Vec<G1Projective>,
+    vec_R: Vec<G1Projective>,
 
     c_final: Fr,
     d_final: Fr,
@@ -571,29 +572,39 @@ impl WeightedInnerProductProof {
             let e2_xL_einv2_xR = e2_xL + einv2_xR;
             let alpha_hat = alpha + e2_xL_einv2_xR;
 
+            // Now we make G_hat
+            let e_yinv = e * powers_y_inv[n-1];
+            let G_hat = (0..n)
+                .map(|i| {
+                    let GLe_inv = G_L[i] * e_inv;
+                    let GRe_yinv = G_R[i] * e_yinv;
+                    *GRe_yinv + *GLe_inv
+                })
+                .collect::<Vec<G1Affine>>();
+            //   G = &mut G_hat[..];
 
-
-            /*for i in 0..n {
-                c_L[i] += gamma_inv * c_R[i];
-                d_L[i] += gamma * d_R[i];
-                G_L[i] = (G_L[i] + G_R[i].mul(gamma)).into_affine();
-                H_L[i] = (H_L[i] + H_R[i].mul(gamma_inv)).into_affine();
-            }*/
+            let H_hat = (0..n)
+                .map(|i| {
+                    let HLe = H_L[i] * e;
+                    let HRe_inv = H_R[i] * e_inv;
+                    *HLe + *HRe_inv
+                })
+                .collect::<Vec<G1Affine>>();
 
             // Save the rescaled vector for splitting in the next loop
-            slice_c = c_L;
-            slice_d = d_L;
-            slice_G = G_L;
-            slice_H = H_L;
+            slice_c = &mut c_hat.as_slice();
+            slice_d = &mut d_hat.as_slice();
+            slice_G = &mut G_hat.as_slice();
+            slice_H = &mut H_hat.as_slice();
         }
 
         WeightedInnerProductProof {
             G: crs_G_vec,
             H: crs_H_vec,
-            vec_c_L: vec_c_L,
-            vec_c_R: vec_c_R,
-            vec_d_L: vec_d_L,
-            vec_d_R: vec_d_R,
+            g: *crs_G,
+            h: *crs_H,
+            vec_L: L,
+            vec_R: R,
             c_final: slice_c[0],
             d_final: slice_d[0],
         }

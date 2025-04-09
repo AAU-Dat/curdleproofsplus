@@ -1,4 +1,5 @@
 #![doc = include_str!("../README.md")]
+extern crate core;
 
 pub mod commitments;
 pub mod crs;
