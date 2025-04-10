@@ -709,7 +709,7 @@ impl WeightedInnerProductProof {
         Ok((challenges, challenges_inv, vec_s, vec_inv_s))
     }
 
-/*    /// Verify an inner product proof
+    /// Verify an inner product proof
     ///
     /// # Arguments
     ///
@@ -724,27 +724,32 @@ impl WeightedInnerProductProof {
     pub fn verify<T: RngCore>(
         &self,
         crs_G_vec: &Vec<G1Affine>,
+        hi_tag: &Vec<G1Affine>,
+        crs_G: &G1Projective,
         crs_H: &G1Projective,
 
-        C: G1Projective, // no need for mut
-        D: G1Projective,
+        P: G1Projective, // no need for mut
         z: Fr,
         vec_u: Vec<Fr>,
+        y: Fr,
 
         transcript: &mut Transcript,
         msm_accumulator: &mut MsmAccumulator,
 
         rng: &mut T,
     ) -> Result<(), ProofError> {
-        let n = crs_G_vec.len();
+        let G = crs_G_vec;
+        let H = hi_tag;
+        let n = G.len();
+        
+        assert_eq!(H.len(), n);
         assert!(n.is_power_of_two());
 
         // Step 1:
-        transcript.append_list(b"ipa_step1", &[&C, &D]);
+        transcript.append(b"ipa_step1", &P);
         transcript.append(b"ipa_step1", &z);
-        transcript.append_list(b"ipa_step1", &[&self.B_c, &self.B_d]);
-        let alpha = transcript.get_and_append_challenge(b"ipa_alpha");
-        let beta = transcript.get_and_append_challenge(b"ipa_beta");
+/*        let alpha = transcript.get_and_append_challenge(b"ipa_alpha");
+        let beta = transcript.get_and_append_challenge(b"ipa_beta");*/
 
         // Step 2
         let (vec_gamma, vec_gamma_inv, vec_s, vec_inv_s) =
@@ -808,7 +813,7 @@ impl WeightedInnerProductProof {
             c_final: Fr::deserialize_compressed(&mut r)?,
             d_final: Fr::deserialize_compressed(&mut r)?,
         })
-    }*/
+    }
 }
 
 
@@ -922,7 +927,7 @@ mod tests {
         // There is actually a relationship between crs_G_vec and crs_G_prime_vec because of the grandproduct optimization
         // We generate a `vec_u` which has the discrete logs of every crs_G_prime element with respect to crs_G
         let vec_u = generate_blinders(&mut rng, n);
-        let crs_G_prime_vec: Vec<G1Affine> = crs_G_vec
+        let crs_H_vec: Vec<G1Affine> = crs_G_vec
             .iter()
             .zip(&vec_u)
             .map(|(G_i, u_i)| G_i.mul(*u_i).into_affine())
@@ -936,16 +941,44 @@ mod tests {
 
         let z = inner_product(&vec_c, &vec_d);
 
-        // Create commitments
-        let P = msm(&crs_G_prime_vec, &vec_c);
-
         let y_scalar = Fr::rand(&mut rng);
+        let y_inv = y_scalar.inverse().unwrap();
+        let powers_y = iterate(y_scalar.clone(), |i| i.clone() * y_scalar)
+            .take(n)
+            .collect::<Vec<Fr>>();
+        let powers_y_inv = iterate(y_inv.clone(), |i| i.clone() * y_inv.clone())
+            .take(n)
+            .collect::<Vec<Fr>>();
 
         let alpha = Fr::rand(&mut rng);
 
+        let hi_tag = (0..n)
+            .map(|i| crs_H_vec[i] * powers_y_inv[i])
+            .collect::<Vec<G1Projective>>();
+
+        // P = <a * G> + <b_L * H_R> + c * g + alpha*h
+        let g_z: G1Projective = crs_G * z; // Todo: Implement
+        let h_alpha: G1Projective = crs_H * alpha;
+        let gz_halpha: G1Projective = g_z + h_alpha;
+        let c_G: G1Projective = (0..n)
+            .map(|i| {
+                crs_G_vec[i] * vec_c[i]
+            })
+            .fold(gz_halpha, |acc, x| {
+                acc + x
+            });
+        
+        let P = (0..n)
+            .map(|i| {
+                hi_tag[i] * vec_d[i]
+            })
+            .fold(c_G, |acc, x| {
+                acc + x
+            });
+
         let proof = WeightedInnerProductProof::new(
             crs_G_vec.clone(),
-            crs_G_prime_vec.clone(),
+            crs_H_vec.clone(),
             &crs_H,
             &crs_G,
             P.clone(),
@@ -962,19 +995,21 @@ mod tests {
         let mut transcript_verifier = merlin::Transcript::new(b"IPA");
         let mut msm_accumulator = MsmAccumulator::new();
 
-        /*assert!(proof
+        assert!(proof
             .verify(
                 &crs_G_vec,
+                &hi_tag.iter().map(|i| i.into_affine()).collect(),
+                &crs_G,
                 &crs_H,
-                B,
-                C,
+                P,
                 z,
                 vec_u.clone(),
+                y_scalar,
                 &mut transcript_verifier,
                 &mut msm_accumulator,
                 &mut rng,
             )
-            .is_ok());*/
+            .is_ok());
 
         assert!(msm_accumulator.verify().is_ok());
 
