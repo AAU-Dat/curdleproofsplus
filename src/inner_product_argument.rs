@@ -570,7 +570,7 @@ impl WeightedInnerProductProof {
             let e2_xL = &e_squared * &x_L_Fr;
             let einv2_xR = e_inv_squared * &x_R_Fr;
             let e2_xL_einv2_xR = &e2_xL + &einv2_xR;
-            alpha = alpha + e2_xL_einv2_xR; // TODO: Send Alpha to next recusive step
+            alpha = alpha + e2_xL_einv2_xR;
 
             // Now we make G_hat
             let e_yinv = e * powers_y_inv[n-1];
