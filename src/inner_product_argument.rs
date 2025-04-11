@@ -4,7 +4,7 @@ use std::ops::Mul;
 
 use ark_bls12_381::{Fr, G1Affine, G1Projective};
 use ark_ec::CurveGroup;
-use ark_ff::{batch_inversion, Field, PrimeField};
+use ark_ff::{batch_inversion, Field};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Read, SerializationError, Write};
 use ark_std::rand::RngCore;
 use ark_std::{One, UniformRand, Zero};
@@ -18,7 +18,8 @@ use crate::transcript::CurdleproofsTranscript;
 use crate::util::deserialize_g1projective_vec;
 use crate::util::serialize_g1projective_vec;
 use crate::util::{
-    generate_blinders, get_verification_scalars_bitstring, inner_product, weighted_inner_product, msm, msm_from_projective,
+    generate_blinders, get_verification_scalars_bitstring, inner_product, msm, msm_from_projective,
+    weighted_inner_product,
 };
 
 /// An IPA proof object
@@ -416,7 +417,7 @@ impl WeightedInnerProductProof {
         let mut vec_R = Vec::with_capacity(lg_n);
 
         // Step 1
-        /* 
+        /*
         We don't need blinders as bp+ is zk
         let (vec_r_c, vec_r_d) = generate_ipa_blinders(rng, &vec_c, &vec_d);
 
@@ -445,10 +446,10 @@ impl WeightedInnerProductProof {
         let mut slice_H = &mut crs_H_vec[..];
         let mut slice_c = &mut vec_c[..];
         let mut slice_d = &mut vec_d[..];
-        let mut c_hat = vec![Fr::zero(); if n==1 {n} else {n/2}];
-        let mut d_hat = vec![Fr::zero(); if n==1 {n} else {n/2}];
-        let mut vec_G_hat_affine = vec![G1Affine::identity(); if n==1 {n} else {n/2}];
-        let mut vec_H_hat_affine = vec![G1Affine::identity(); if n==1 {n} else {n/2}];
+        let mut c_hat = vec![Fr::zero(); if n == 1 { n } else { n / 2 }];
+        let mut d_hat = vec![Fr::zero(); if n == 1 { n } else { n / 2 }];
+        let mut vec_G_hat_affine = vec![G1Affine::identity(); if n == 1 { n } else { n / 2 }];
+        let mut vec_H_hat_affine = vec![G1Affine::identity(); if n == 1 { n } else { n / 2 }];
 
         while slice_c.len() > 1 {
             n /= 2;
@@ -483,11 +484,11 @@ impl WeightedInnerProductProof {
             // Note that no element in vectors c_L and d_R can be 0
             // since 0 is an invalid secret key!
             // L = <yninv_cL * G_R> + <d_R * H_L> + (z_L * g) + (x_L * h)
-            let g_zL:G1Projective = *crs_G * z_L;
+            let g_zL: G1Projective = *crs_G * z_L;
             let x_L_Fr = Fr::rand(rng);
-            let h_x_L:G1Projective = *crs_H * x_L_Fr;
-            let g_zL_h_xL:G1Projective = g_zL + h_x_L;
-            let yninv_cL_GR = G_R.iter().zip(yninv_cL).fold(g_zL_h_xL, |acc,x| {
+            let h_x_L: G1Projective = *crs_H * x_L_Fr;
+            let g_zL_h_xL: G1Projective = g_zL + h_x_L;
+            let yninv_cL_GR = G_R.iter().zip(yninv_cL).fold(g_zL_h_xL, |acc, x| {
                 if x.1 != Fr::zero() {
                     let cLi = x.1;
                     let cLi_GRi = *x.0 * cLi;
@@ -496,7 +497,7 @@ impl WeightedInnerProductProof {
                     acc
                 }
             });
-            let L = H_L.iter().zip(&mut *d_R).fold(yninv_cL_GR, |acc,x| {
+            let L = H_L.iter().zip(&mut *d_R).fold(yninv_cL_GR, |acc, x| {
                 if x.1 != &Fr::zero() {
                     let dRi = x.1;
                     let dRi_HLi = *x.0 * dRi;
@@ -511,11 +512,11 @@ impl WeightedInnerProductProof {
             // since 0 is an invalid secret key!
             //
             // R = <yn_c_R * G_R> + <d_L * H_R> + (z_R * g) + (x_R * h)
-            let g_zR:G1Projective = *crs_G * z_R;
+            let g_zR: G1Projective = *crs_G * z_R;
             let x_R_Fr = Fr::rand(rng);
-            let h_x_R:G1Projective = *crs_H * x_R_Fr;
-            let g_zR_h_xR:G1Projective = g_zR + h_x_R;
-            let cR_GL = G_L.iter().zip(yn_c_R.clone()).fold(g_zR_h_xR, |acc,x| {
+            let h_x_R: G1Projective = *crs_H * x_R_Fr;
+            let g_zR_h_xR: G1Projective = g_zR + h_x_R;
+            let cR_GL = G_L.iter().zip(yn_c_R.clone()).fold(g_zR_h_xR, |acc, x| {
                 if x.1 != Fr::zero() {
                     let cRi = x.1;
                     let cRi_GLi = *x.0 * cRi;
@@ -573,11 +574,11 @@ impl WeightedInnerProductProof {
             alpha = alpha + e2_xL_einv2_xR;
 
             // Now we make G_hat
-            let e_yinv = e * powers_y_inv[n-1];
+            let e_yinv = e * powers_y_inv[n - 1];
             let mut G_hat = (0..n)
                 .map(|i| {
-                    let GLe_inv:G1Projective = G_L[i] * e_inv;
-                    let GRe_yinv:G1Projective = G_R[i] * e_yinv;
+                    let GLe_inv: G1Projective = G_L[i] * e_inv;
+                    let GRe_yinv: G1Projective = G_R[i] * e_yinv;
                     GRe_yinv + GLe_inv
                 })
                 .collect::<Vec<G1Projective>>();
@@ -585,17 +586,18 @@ impl WeightedInnerProductProof {
 
             let mut H_hat = (0..n)
                 .map(|i| {
-                    let HLe:G1Projective = H_L[i] * e;
-                    let HRe_inv:G1Projective = H_R[i] * e_inv;
+                    let HLe: G1Projective = H_L[i] * e;
+                    let HRe_inv: G1Projective = H_R[i] * e_inv;
                     HLe + HRe_inv
                 })
                 .collect::<Vec<G1Projective>>();
 
-
-            vec_G_hat_affine = G_hat.iter()
+            vec_G_hat_affine = G_hat
+                .iter()
                 .map(|x| x.into_affine())
                 .collect::<Vec<G1Affine>>();
-            vec_H_hat_affine = H_hat.iter()
+            vec_H_hat_affine = H_hat
+                .iter()
                 .map(|x| x.into_affine())
                 .collect::<Vec<G1Affine>>();
             // Save the rescaled vector for splitting in the next loop
@@ -615,7 +617,7 @@ impl WeightedInnerProductProof {
         let Gr: G1Projective = slice_G[0] * r;
         let Hs: G1Projective = slice_H[0] * s;
         let c_s = slice_c[0] * s;
-        let c_sy = c_s*y;
+        let c_sy = c_s * y;
         let d_r = slice_d[0] * r;
         let d_ry = d_r * y;
         let c_sy_d_ry = c_sy + d_ry;
@@ -630,11 +632,9 @@ impl WeightedInnerProductProof {
         let h_eta: G1Projective = *crs_H * eta;
         let B: G1Projective = g_r_sy + h_eta;
 
-
         transcript.append_list(b"final_A_and_B_step", &[&A, &B]);
         // compute challenge ee
         let ee = transcript.get_and_append_challenge(b"final_e");
-        let ee_inv = ee.inverse().expect("ee must have an inverse");
         let ee_squared = ee * ee;
 
         // compute r_prime, s_prime, delta_prime
@@ -655,11 +655,11 @@ impl WeightedInnerProductProof {
             b_tag: B,
             r_prime,
             s_prime,
-            delta_prime
+            delta_prime,
         }
     }
 
-    /// Generate verification scalars for the IPA [verifier optimization](crate::notes::optimizations#ipa-verification-scalars)
+/*    /// Generate verification scalars for the IPA [verifier optimization](crate::notes::optimizations#ipa-verification-scalars)
     #[allow(clippy::type_complexity)]
     fn verification_scalars(
         &self,
@@ -679,13 +679,7 @@ impl WeightedInnerProductProof {
         // 1. Recompute gamma_k,...,gamma_1 based on the proof transcript
         let mut challenges: Vec<Fr> = Vec::with_capacity(lg_n);
         for i in 0..self.vec_L.len() {
-            transcript.append_list(
-                b"ipa_loop",
-                &[
-                    &self.vec_L[i],
-                    &self.vec_R[i],
-                ],
-            );
+            transcript.append_list(b"ipa_loop", &[&self.vec_L[i], &self.vec_R[i]]);
             challenges.push(transcript.get_and_append_challenge(b"ipa_gamma"));
         }
 
@@ -707,7 +701,7 @@ impl WeightedInnerProductProof {
         batch_inversion(&mut vec_inv_s);
 
         Ok((challenges, challenges_inv, vec_s, vec_inv_s))
-    }
+    }*/
 
     /// Verify an inner product proof
     ///
@@ -741,56 +735,148 @@ impl WeightedInnerProductProof {
         let G = crs_G_vec;
         let H = hi_tag;
         let n = G.len();
-        
+
         assert_eq!(H.len(), n);
         assert!(n.is_power_of_two());
 
+        // Compute powers of y
+        let y_inv = y.inverse().expect("y must have an inverse");
+        let powers_yinv = iterate(y_inv.clone(), |i| i.clone() * y_inv.clone())
+            .take(n)
+            .collect::<Vec<Fr>>();
+
         // Step 1:
-        transcript.append(b"ipa_step1", &P);
-        transcript.append(b"ipa_step1", &z);
-/*        let alpha = transcript.get_and_append_challenge(b"ipa_alpha");
+        transcript.append(b"ipa_P", &P);
+        transcript.append(b"ipa_z", &z);
+        transcript.append_list(b"ipa_step2", &[G, H]);
+        /*        let alpha = transcript.get_and_append_challenge(b"ipa_alpha");
         let beta = transcript.get_and_append_challenge(b"ipa_beta");*/
 
-        // Step 2
-        let (vec_gamma, vec_gamma_inv, vec_s, vec_inv_s) =
-            self.verification_scalars(n, transcript)?;
+        // We do the same steps as the prover, but we work from bottom to top
+        if n != 1 {
+            let n = n / 2;
+            let (G_L, G_R) = G.split_at(n);
+            let (H_L, H_R) = H.split_at(n);
 
-        // Get vector of c*s_i for first accumulated check
-        let vec_c_times_s: Vec<Fr> = vec_s.iter().map(|s_i| self.c_final * *s_i).collect();
+            let x = transcript.get_and_append_challenge(b"ipa_x");
+            let x_inv = x.inverse().expect("x must have an inverse");
+            let x_square = x * x;
+            let x_square_inv = x_inv * x_inv;
 
-        let mut vec_rhs_scalars = vec_c_times_s; // collect right-hand-side scalars of first check
-        vec_rhs_scalars.push(self.c_final * self.d_final * beta);
-        let mut vec_G_H = crs_G_vec.clone(); // collect right-hand-side points of first check
-        vec_G_H.push(crs_H.into_affine());
+            let x_yinv = x * powers_yinv[n - 1];
+            let G_hat = (0..n)
+                .map(|i| {
+                    let GLx_inv: G1Projective = G_L[i] * &x_inv;
+                    let GRx_yinv = G_R[i] * &x_yinv;
+                    GRx_yinv + GLx_inv
+                })
+                .collect::<Vec<G1Projective>>();
+            let G_hat_affine = G_hat.iter().map(|GH| GH.into_affine()).collect();
+            //   G = &mut G_hat[..];
 
-        // Step 3
-        let H = crs_H.mul(beta);
-        let C_a = self.B_c + C.mul(alpha) + H.mul(alpha * alpha * z);
+            let H_hat = (0..n)
+                .map(|i| {
+                    let HLx = H_L[i] * x;
+                    let HRx_inv = H_R[i] * &x_inv;
+                    HLx + HRx_inv
+                })
+                .collect::<Vec<G1Projective>>();
+            let H_hat_affine = H_hat.iter().map(|HH| HH.into_affine()).collect();
+            //    H = &mut H_hat[..];
 
-        let point_lhs = msm_from_projective(&self.vec_c_L, &vec_gamma)
-            + C_a
-            + msm_from_projective(&self.vec_c_R, &vec_gamma_inv);
+            // We compute P
+            let Lx_sq: G1Projective = self.vec_L[0] * &x_square;
+            let Rx_sq_inv = self.vec_R[0] * x_square_inv;
+            let P_tag: G1Projective = Lx_sq + Rx_sq_inv + P;
 
-        msm_accumulator.accumulate_check(&point_lhs, &vec_rhs_scalars, &vec_G_H, rng);
+            let wip = WeightedInnerProductProof {
+                vec_L: (&self.vec_L[1..]).to_vec(),
+                vec_R: (&self.vec_R[1..]).to_vec(),
+                a_tag: self.a_tag.clone(),
+                b_tag: self.b_tag.clone(),
+                r_prime: self.r_prime.clone(),
+                s_prime: self.s_prime.clone(),
+                delta_prime: self.delta_prime.clone(),
+            };
+            return wip.verify(
+                &G_hat_affine,
+                &H_hat_affine,
+                crs_G,
+                crs_H,
+                P_tag,
+                z,
+                vec_u,
+                y,
+                transcript,
+                msm_accumulator,
+                rng,
+            );
+        }
 
-        // Get vector of d*((1/s_i) * u_i) for the second accumulated check
-        let vec_d_div_s: Vec<Fr> = vec_inv_s
-            .into_iter()
-            .zip(vec_u)
-            .map(|(s_inv_i, u_i)| self.d_final * (s_inv_i * u_i))
-            .collect();
+        let e = transcript.get_and_append_challenge(b"ipa_e");
+        let e_square = e * e;
 
-        let D_a = self.B_d + D.mul(alpha);
-        let point_lhs = msm_from_projective(&self.vec_d_L, &vec_gamma)
-            + D_a
-            + msm_from_projective(&self.vec_d_R, &vec_gamma_inv);
+        // Left-hand side of verification
+        // LHS = e^2*P + e*A + B
+        let P_e2: G1Projective = P * e_square;
+        let Ae: G1Projective = self.a_tag * e;
+        let left = P_e2 + Ae + &self.b_tag;
 
-        msm_accumulator.accumulate_check(&point_lhs, &vec_d_div_s, crs_G_vec, rng);
+        // RHS = (e*r')*G + (e*s')*H + (r'*s'*y)*g + (delta')*h
+        let er_prime = e * self.r_prime;
+        let Ger_prime = G[0] * er_prime;
+        let es_prime = e * self.s_prime;
+        let Hes_prime = H[0] * es_prime;
+        let r_prime_s_prime = self.r_prime * self.s_prime;
+        let y_r_prime_s_prime = y * r_prime_s_prime;
+        let g_y_r_prime_s_prime: G1Projective = *crs_G * y_r_prime_s_prime;
+        let h_delta_prime: G1Projective = *crs_H * self.delta_prime;
+        let right = Ger_prime + Hes_prime + g_y_r_prime_s_prime + h_delta_prime;
 
-        Ok(())
+        /*// Step 2
+                let (vec_gamma, vec_gamma_inv, vec_s, vec_inv_s) =
+                    self.verification_scalars(n, transcript)?;
+
+                // Get vector of c*s_i for first accumulated check
+                let vec_c_times_s: Vec<Fr> = vec_s.iter().map(|s_i| self.c_final * *s_i).collect();
+
+                let mut vec_rhs_scalars = vec_c_times_s; // collect right-hand-side scalars of first check
+                vec_rhs_scalars.push(self.c_final * self.d_final * beta);
+                let mut vec_G_H = crs_G_vec.clone(); // collect right-hand-side points of first check
+                vec_G_H.push(crs_H.into_affine());
+
+                // Step 3
+                let H = crs_H.mul(beta);
+                let C_a = self.B_c + C.mul(alpha) + H.mul(alpha * alpha * z);
+
+                let point_lhs = msm_from_projective(&self.vec_c_L, &vec_gamma)
+                    + C_a
+                    + msm_from_projective(&self.vec_c_R, &vec_gamma_inv);
+
+                msm_accumulator.accumulate_check(&point_lhs, &vec_rhs_scalars, &vec_G_H, rng);
+
+                // Get vector of d*((1/s_i) * u_i) for the second accumulated check
+                let vec_d_div_s: Vec<Fr> = vec_inv_s
+                    .into_iter()
+                    .zip(vec_u)
+                    .map(|(s_inv_i, u_i)| self.d_final * (s_inv_i * u_i))
+                    .collect();
+
+                let D_a = self.B_d + D.mul(alpha);
+                let point_lhs = msm_from_projective(&self.vec_d_L, &vec_gamma)
+                    + D_a
+                    + msm_from_projective(&self.vec_d_R, &vec_gamma_inv);
+
+                msm_accumulator.accumulate_check(&point_lhs, &vec_d_div_s, crs_G_vec, rng);
+        */
+        if left == right {
+            Ok(())
+        } else {
+            Err(ProofError::VerificationError)
+        }
     }
 
-    pub fn serialize<W: Write>(&self, mut w: W) -> Result<(), SerializationError> {
+    /*pub fn serialize<W: Write>(&self, mut w: W) -> Result<(), SerializationError> {
         self.B_c.serialize_compressed(&mut w)?;
         self.B_d.serialize_compressed(&mut w)?;
         serialize_g1projective_vec(&self.vec_c_L, &mut w)?;
@@ -813,24 +899,21 @@ impl WeightedInnerProductProof {
             c_final: Fr::deserialize_compressed(&mut r)?,
             d_final: Fr::deserialize_compressed(&mut r)?,
         })
-    }
+    }*/
 }
-
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::msm_accumulator::MsmAccumulator;
     use ark_std::rand::{rngs::StdRng, Rng, SeedableRng};
     use ark_std::UniformRand;
     use core::iter;
-    use sha2::digest::Update;
-    use sha2::Sha256;
-    use crate::msm_accumulator::MsmAccumulator;
 
     #[test]
     fn test_inner_product_argument() {
         let mut rng = StdRng::seed_from_u64(0u64);
-        let mut transcript_prover = merlin::Transcript::new(b"IPA");
+        let mut transcript_prover = Transcript::new(b"IPA");
 
         let n = 128;
 
@@ -872,7 +955,7 @@ mod tests {
         );
 
         // Reset the FS
-        let mut transcript_verifier = merlin::Transcript::new(b"IPA");
+        let mut transcript_verifier = Transcript::new(b"IPA");
         let mut msm_accumulator = MsmAccumulator::new();
 
         assert!(proof
@@ -893,7 +976,7 @@ mod tests {
 
         ////////////////////////////////////////////////////
         // Let's also try a basic bad proof test where we provide the wrong inner product result to the verifeir
-        let mut transcript_verifier = merlin::Transcript::new(b"IPA");
+        let mut transcript_verifier = Transcript::new(b"IPA");
         let mut msm_accumulator = MsmAccumulator::new();
 
         assert!(proof
@@ -916,7 +999,7 @@ mod tests {
     #[test]
     fn test_weighted_inner_product_argument() {
         let mut rng = StdRng::seed_from_u64(0u64);
-        let mut transcript_prover = merlin::Transcript::new(b"IPA");
+        let mut transcript_prover = Transcript::new(b"IPA");
 
         let n = 128;
 
@@ -957,24 +1040,16 @@ mod tests {
             .collect::<Vec<G1Projective>>();
 
         // P = <a * G> + <b_L * H_R> + c * g + alpha*h
-        let g_z: G1Projective = crs_G * z; // Todo: Implement
+        let g_z: G1Projective = crs_G * z;
         let h_alpha: G1Projective = crs_H * alpha;
         let gz_halpha: G1Projective = g_z + h_alpha;
         let c_G: G1Projective = (0..n)
-            .map(|i| {
-                crs_G_vec[i] * vec_c[i]
-            })
-            .fold(gz_halpha, |acc, x| {
-                acc + x
-            });
-        
+            .map(|i| crs_G_vec[i] * vec_c[i])
+            .fold(gz_halpha, |acc, x| acc + x);
+
         let P = (0..n)
-            .map(|i| {
-                hi_tag[i] * vec_d[i]
-            })
-            .fold(c_G, |acc, x| {
-                acc + x
-            });
+            .map(|i| hi_tag[i] * vec_d[i])
+            .fold(c_G, |acc, x| acc + x);
 
         let proof = WeightedInnerProductProof::new(
             crs_G_vec.clone(),
@@ -992,11 +1067,10 @@ mod tests {
         );
 
         // Reset the FS
-        let mut transcript_verifier = merlin::Transcript::new(b"IPA");
+        let mut transcript_verifier = Transcript::new(b"IPA");
         let mut msm_accumulator = MsmAccumulator::new();
 
-        assert!(proof
-            .verify(
+        assert!(proof.verify(
                 &crs_G_vec,
                 &hi_tag.iter().map(|i| i.into_affine()).collect(),
                 &crs_G,
@@ -1011,28 +1085,26 @@ mod tests {
             )
             .is_ok());
 
-        assert!(msm_accumulator.verify().is_ok());
-
         ////////////////////////////////////////////////////
-        // Let's also try a basic bad proof test where we provide the wrong inner product result to the verifeir
-        let mut transcript_verifier = merlin::Transcript::new(b"IPA");
+        // Let's also try a basic bad proof test where we provide the wrong inner product result to the verifier
+        let mut transcript_verifier = Transcript::new(b"IPA");
         let mut msm_accumulator = MsmAccumulator::new();
 
-        /*assert!(proof
+        assert!(proof
             .verify(
                 &crs_G_vec,
+                &hi_tag.iter().map(|i| i.into_affine()).collect(),
+                &crs_G,
                 &crs_H,
-                B,
-                C,
+                P,
                 z + Fr::one(),
-                vec_u,
+                vec_u.clone(),
+                y_scalar,
                 &mut transcript_verifier,
                 &mut msm_accumulator,
                 &mut rng,
             )
-            .is_ok());*/
-
-        assert!(msm_accumulator.verify().is_err());
+            .is_err());
     }
 
     #[test]
@@ -1070,4 +1142,3 @@ mod tests {
         assert_eq!(Fr::from(444u64), weighted_inner_product(&a, &b, y));
     }
 }
-
