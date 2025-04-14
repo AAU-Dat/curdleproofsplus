@@ -623,7 +623,6 @@ impl WeightedInnerProductProof {
         // compute challenge ee
         let ee = transcript.get_and_append_challenge(b"final_e");
         let ee_squared = &ee * &ee;
-        println!("ProverP: {}", B);
 
         // compute r_prime, s_prime, delta_prime
         let cee = slice_c[0] * ee;
@@ -759,7 +758,6 @@ impl WeightedInnerProductProof {
         
         let e = transcript.get_and_append_challenge(b"final_e");
         let e_square = &e * &e;
-        println!("VerifierP: {}", self.b_tag);
         
 
         // Left-hand side of verification
@@ -767,7 +765,6 @@ impl WeightedInnerProductProof {
         let P_e2: G1Projective = P_tag * &e_square;
         let Ae: G1Projective = self.a_tag * e;
         let left: G1Projective = P_e2 + Ae + self.b_tag;
-        println!("l: {}", left);
 
         // RHS = (e*r')*G + (e*s')*H + (r'*s'*y)*g + (delta')*h
         let er_prime = e * self.r_prime;
@@ -779,7 +776,6 @@ impl WeightedInnerProductProof {
         let g_y_r_prime_s_prime: G1Projective = *crs_G * y_r_prime_s_prime;
         let h_delta_prime: G1Projective = *crs_H * self.delta_prime;
         let right: G1Projective = Ger_prime + Hes_prime + g_y_r_prime_s_prime + h_delta_prime;
-        println!("r: {}", right);
         
         if left == right {
             Ok(())
