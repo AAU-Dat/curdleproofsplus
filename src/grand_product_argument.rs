@@ -7,24 +7,26 @@ use ark_ec::CurveGroup;
 use ark_ff::{Field, One};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Read, SerializationError, Write};
 use ark_std::rand::RngCore;
-use ark_std::Zero;
-
+use ark_std::{UniformRand, Zero};
+use itertools::iterate;
 use crate::transcript::CurdleproofsTranscript;
 use merlin::Transcript;
 
 use crate::errors::ProofError;
-use crate::inner_product_argument::InnerProductProof;
+use crate::inner_product_argument::{InnerProductProof, WeightedInnerProductProof};
 use crate::msm_accumulator::MsmAccumulator;
-use crate::util::{generate_blinders, inner_product, msm};
+use crate::util::{generate_blinders, inner_product, msm, weighted_inner_product};
 
 /// A GrandProduct proof object
-#[derive(Clone, Debug, CanonicalSerialize, CanonicalDeserialize)]
+#[derive(Clone, Debug)]
 pub struct GrandProductProof {
     C: G1Projective,
+    
+    P: G1Projective,
 
     r_p: Fr,
 
-    ipa_proof: InnerProductProof,
+    wipa_proof: WeightedInnerProductProof,
 }
 
 impl GrandProductProof {
@@ -44,6 +46,7 @@ impl GrandProductProof {
         crs_G_vec: &Vec<G1Affine>,
         crs_H_vec: &Vec<G1Affine>,
         crs_U: &G1Projective, // This is actually H in the paper
+        crs_G: &G1Projective,
 
         B: G1Projective,
         gprod_result: Fr,
@@ -73,15 +76,13 @@ impl GrandProductProof {
         }
 
         let vec_c_blinders = generate_blinders(rng, n_blinders); // vec_r_c in the paper
-        let C = msm(crs_G_vec, &vec_c) + msm(crs_H_vec, &vec_c_blinders);
-
+        
         // Compute r_p
         let vec_r_b_plus_alpha: Vec<Fr> =
             vec_b_blinders.iter().map(|r_b_i| *r_b_i + alpha).collect();
         let r_p = inner_product(&vec_r_b_plus_alpha, &vec_c_blinders);
-
-        transcript.append(b"gprod_step2", &C);
         transcript.append(b"gprod_step2", &r_p);
+        
         let beta = transcript.get_and_append_challenge(b"gprod_beta");
         let beta_inv = beta.inverse().expect("beta must have an inverse");
 
@@ -101,7 +102,7 @@ impl GrandProductProof {
             .map(|H_i| H_i.mul(beta_inv.pow([ell_plus_one])).into_affine())
             .collect();
 
-        // Build the new b' and d vectors
+        // Build b' for the d vector
         let mut vec_b_prime: Vec<Fr> = Vec::with_capacity(ell);
         let mut pow_beta = beta;
         for b_i in vec_b.into_iter() {
@@ -124,45 +125,63 @@ impl GrandProductProof {
             .iter()
             .map(|f_i| beta.pow([ell_plus_one]) * f_i)
             .collect();
-
-        // Create D commitment
-        let vec_alphabeta: Vec<Fr> = iter::repeat(alpha * (beta.pow([ell_plus_one])))
-            .take(n_blinders)
-            .collect();
-        let D = B - msm(&vec_G_prime, &vec_beta_powers) + msm(&vec_H_prime, &vec_alphabeta);
-
+        
         // Step 4
         // Build G
         let mut vec_G = crs_G_vec.clone();
         vec_G.extend(crs_H_vec);
         // Build G'
         vec_G_prime.extend(vec_H_prime);
-
-        let inner_prod =
+        
+        let y = Fr::one();
+        
+        let weighted_inner_prod =
             r_p * beta.pow([(ell + 1) as u64]) + gprod_result * beta.pow([ell as u64]) - Fr::one();
 
         vec_c.extend(vec_c_blinders);
         vec_d.extend(vec_d_blinders);
+        
+        let C = G1Projective::rand(rng);
+        let D = G1Projective::rand(rng);
+
+        let wip = weighted_inner_product(&vec_c, &vec_d, y);
+
+        let alphawip = transcript.get_and_append_challenge(b"alphawip");
+
+        // P = <a * G> + <b_L * H_R> + c * g + alpha*h
+        let g_z: G1Projective = *crs_G * wip;
+        let h_alpha: G1Projective = *crs_U * alphawip;
+        let gz_halpha: G1Projective = g_z + h_alpha;
+        let c_G: G1Projective = (0..n)
+            .map(|i| crs_G_vec[i] * vec_c[i])
+            .fold(gz_halpha, |acc, x| acc + x);
+
+        let P = (0..n)
+            .map(|i| crs_H_vec[i] * &vec_d[i])
+            .fold(c_G, |acc, x:G1Projective| acc + x);
 
         // Sanity checks
-        debug_assert!(inner_product(&vec_c, &vec_d) == inner_prod); // check inner product
+        debug_assert!(wip == weighted_inner_prod); // check inner product
         debug_assert!((msm(&vec_G, &vec_c) - C).is_zero()); // check C commitment
         debug_assert!((msm(&vec_G_prime, &vec_d) - D).is_zero()); // check D commitment
 
-        let ipa_proof = InnerProductProof::new(
+        let wipa_proof = WeightedInnerProductProof::new(
             vec_G,
             vec_G_prime,
+            crs_G,
             crs_U,
-            C,
-            D,
-            inner_prod,
+            P,
+            wip,
             vec_c,
             vec_d,
+            y,
+            alphawip,
             transcript,
             rng,
         );
+        
 
-        GrandProductProof { C, r_p, ipa_proof }
+        GrandProductProof { C, P, r_p, wipa_proof }
     }
 
     /// Verify a GrandProduct proof
@@ -182,9 +201,11 @@ impl GrandProductProof {
 
         crs_G_vec: &Vec<G1Affine>,
         crs_H_vec: &Vec<G1Affine>,
+        crs_G: &G1Projective,
         crs_U: &G1Projective, // This is actually H in the paper
         crs_G_sum: &G1Affine,
         crs_H_sum: &G1Affine,
+        P: &G1Projective,
 
         B: G1Projective,
         gprod_result: Fr,
@@ -227,37 +248,25 @@ impl GrandProductProof {
         let mut vec_G = crs_G_vec.clone();
         vec_G.extend(crs_H_vec);
 
-        let inner_prod =
+        let weightedInnerProduct =
             self.r_p * beta.pow([ell_plus_one]) + gprod_result * beta.pow([ell as u64]) - Fr::one();
 
-        self.ipa_proof.verify(
-            &vec_G,
+        let y = Fr::one();
+        
+        self.wipa_proof.verify(
+            crs_G_vec,
+            crs_H_vec,
+            crs_G,
             crs_U,
-            self.C,
-            D,
-            inner_prod,
-            vec_u,
+            *P,
+            weightedInnerProduct,
+            y,
             transcript,
             msm_accumulator,
             rng,
         )?;
 
         Ok(())
-    }
-
-    pub fn serialize<W: Write>(&self, mut w: W) -> Result<(), SerializationError> {
-        self.C.serialize_compressed(&mut w)?;
-        self.r_p.serialize_compressed(&mut w)?;
-        self.ipa_proof.serialize(&mut w)?;
-        Ok(())
-    }
-
-    pub fn deserialize<R: Read>(mut r: R, log2_n: usize) -> Result<Self, SerializationError> {
-        Ok(Self {
-            C: G1Projective::deserialize_compressed(&mut r)?,
-            r_p: Fr::deserialize_compressed(&mut r)?,
-            ipa_proof: InnerProductProof::deserialize(&mut r, log2_n)?,
-        })
     }
 }
 
@@ -286,6 +295,7 @@ mod tests {
             .take(n_blinders)
             .collect();
         let crs_U = G1Projective::rand(&mut rng);
+        let crs_G = G1Projective::rand(&mut rng);
         let crs_G_sum: G1Affine = sum_affine_points(&crs_G_vec);
         let crs_H_sum: G1Affine = sum_affine_points(&crs_H_vec);
 
@@ -293,13 +303,17 @@ mod tests {
         let vec_b_blinders = generate_blinders(&mut rng, n_blinders);
 
         // Compute gprod result without the blinders
-        let gprod_result = vec_b.iter().product();
+        let mut gprod_result = Fr::one();
+        for &b in &vec_b {
+            gprod_result *= b;
+        }
 
         let B = msm(&crs_G_vec, &vec_b) + msm(&crs_H_vec, &vec_b_blinders);
 
         let gprod_proof = GrandProductProof::new(
             &crs_G_vec,
             &crs_H_vec,
+            &crs_G,
             &crs_U,
             B,
             gprod_result,
@@ -317,9 +331,11 @@ mod tests {
             .verify(
                 &crs_G_vec,
                 &crs_H_vec,
+                &crs_G,
                 &crs_U,
                 &crs_G_sum,
                 &crs_H_sum,
+                &gprod_proof.P,
                 B,
                 gprod_result,
                 n_blinders,
@@ -339,9 +355,11 @@ mod tests {
             .verify(
                 &crs_G_vec,
                 &crs_H_vec,
+                &crs_G,
                 &crs_U,
                 &crs_G_sum,
                 &crs_H_sum,
+                &gprod_proof.P,
                 B,
                 gprod_result + Fr::one(),
                 n_blinders,
@@ -359,9 +377,11 @@ mod tests {
             .verify(
                 &crs_G_vec,
                 &crs_H_vec,
+                &crs_G,
                 &crs_U,
                 &crs_G_sum,
                 &crs_H_sum,
+                &gprod_proof.P,
                 B.mul(Fr::rand(&mut rng)),
                 gprod_result,
                 n_blinders,

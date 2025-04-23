@@ -12,7 +12,7 @@ use crate::whisk::{from_bytes_g1affine, to_bytes_g1affine};
 use crate::N_BLINDERS;
 
 /// crs_H, crs_G_t, crs_G_u
-pub const CRS_EXTRA_POINTS: usize = 3;
+pub const CRS_EXTRA_POINTS: usize = 3; // Should be 4
 
 /// The Curdleproofs CRS
 #[derive(Clone, Debug, CanonicalSerialize, CanonicalDeserialize)]
@@ -23,6 +23,7 @@ pub struct CurdleproofsCrs {
     pub vec_H: Vec<G1Affine>,
     /// Base used in the *SameScalar* argument
     pub H: G1Projective,
+    // pub G: G1Projective
     /// Base used in the *SameScalar* argument
     pub G_t: G1Projective,
     /// Base used in the *SameScalar* argument
@@ -35,8 +36,8 @@ pub struct CurdleproofsCrs {
 
 impl CurdleproofsCrs {
     pub fn from_points(ell: usize, points: &[G1Affine]) -> Result<Self, String> {
-        let n = ell + N_BLINDERS;
-        let num_points = n + CRS_EXTRA_POINTS;
+        let n = ell + N_BLINDERS; // Do we need + N_BLINDERS in BP+?
+        let num_points = n + CRS_EXTRA_POINTS; 
         if points.len() < num_points {
             return Err("not enough points".to_owned());
         }
@@ -52,6 +53,7 @@ impl CurdleproofsCrs {
             H: points[n].into(),
             G_t: points[n + 1].into(),
             G_u: points[n + 2].into(),
+            // G: points[n + 3].into(),
             G_sum,
             H_sum,
         })
@@ -59,7 +61,7 @@ impl CurdleproofsCrs {
 
     /// Generate a randomly generated (unsafe) CRS
     pub fn generate_crs(ell: usize) -> Self {
-        let num_points = ell + N_BLINDERS + CRS_EXTRA_POINTS;
+        let num_points = ell + N_BLINDERS + CRS_EXTRA_POINTS; // Again N_BLINDERS
         let mut rng = StdRng::seed_from_u64(0u64);
 
         let points = iter::repeat_with(|| G1Projective::rand(&mut rng).into_affine())
@@ -81,6 +83,7 @@ pub struct CurdleproofsCrsHex {
     pub vec_G: Vec<G1AffineHex>,
     pub vec_H: Vec<G1AffineHex>,
     pub H: G1AffineHex,
+    // pub G: G1AffineHex,
     pub G_t: G1AffineHex,
     pub G_u: G1AffineHex,
     pub G_sum: G1AffineHex,
@@ -94,6 +97,7 @@ impl TryFrom<&CurdleproofsCrs> for CurdleproofsCrsHex {
             vec_G: to_hex_g1affine_vec(&value.vec_G)?,
             vec_H: to_hex_g1affine_vec(&value.vec_H)?,
             H: to_hex_g1affine(&value.H.into())?,
+            // G: to_hex_g1affine(&value.G.into())?,
             G_t: to_hex_g1affine(&value.G_t.into())?,
             G_u: to_hex_g1affine(&value.G_u.into())?,
             G_sum: to_hex_g1affine(&value.G_sum)?,
@@ -109,6 +113,7 @@ impl TryInto<CurdleproofsCrs> for &CurdleproofsCrsHex {
             vec_G: from_hex_g1affine_vec(&self.vec_G)?,
             vec_H: from_hex_g1affine_vec(&self.vec_H)?,
             H: from_hex_g1affine(&self.H)?.into(),
+            // G: from_hex_g1affine(&self.G)?.into(),
             G_t: from_hex_g1affine(&self.G_t)?.into(),
             G_u: from_hex_g1affine(&self.G_u)?.into(),
             G_sum: from_hex_g1affine(&self.G_sum)?,

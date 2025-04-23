@@ -96,6 +96,7 @@ impl CurdleproofsProof {
             &crs.vec_G,
             &crs.vec_H,
             &crs.H,
+            // &crs.G,
             A,
             M,
             &vec_a,

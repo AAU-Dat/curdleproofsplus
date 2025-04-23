@@ -38,6 +38,7 @@ pub struct InnerProductProof {
     d_final: Fr,
 }
 
+#[derive(Clone, Debug)]
 pub struct WeightedInnerProductProof {
     vec_L: Vec<G1Projective>,
     vec_R: Vec<G1Projective>,
@@ -669,7 +670,6 @@ impl WeightedInnerProductProof {
 
         P: G1Projective, // no need for mut
         z: Fr,
-        vec_u: Vec<Fr>,
         y: Fr,
 
         transcript: &mut Transcript,
@@ -966,7 +966,6 @@ mod tests {
                 &crs_H,
                 P.clone(),
                 z.clone(),
-                vec_u.clone(),
                 y_scalar.clone(),
                 &mut transcript_verifier,
                 &mut msm_accumulator,
@@ -989,7 +988,6 @@ mod tests {
                 &crs_H,
                 P.clone(),
                 z + Fr::one(),
-                vec_u.clone(),
                 y_scalar.clone(),
                 &mut transcript_verifier,
                 &mut msm_accumulator,

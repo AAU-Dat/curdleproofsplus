@@ -41,6 +41,7 @@ impl SamePermutationProof {
         crs_G_vec: &Vec<G1Affine>,
         crs_H_vec: &Vec<G1Affine>,
         crs_U: &G1Projective, // This is actually H in the paper
+        crs_G: &G1Projective,
 
         A: G1Projective,
         M: G1Projective,
@@ -83,6 +84,7 @@ impl SamePermutationProof {
         let grand_product_proof = GrandProductProof::new(
             crs_G_vec,
             crs_H_vec,
+            crs_G,
             crs_U,
             B,
             gprod_result,
@@ -114,6 +116,7 @@ impl SamePermutationProof {
 
         crs_G_vec: &Vec<G1Affine>,
         crs_H_vec: &Vec<G1Affine>,
+        crs_G: &G1Projective,
         crs_U: &G1Projective, // This is actually H in the paper
         crs_G_sum: &G1Affine,
         crs_H_sum: &G1Affine,
@@ -156,6 +159,7 @@ impl SamePermutationProof {
         self.grand_product_proof.verify(
             crs_G_vec,
             crs_H_vec,
+            crs_G,
             crs_U,
             crs_G_sum,
             crs_H_sum,
@@ -169,19 +173,7 @@ impl SamePermutationProof {
 
         Ok(())
     }
-
-    pub fn serialize<W: Write>(&self, mut w: W) -> Result<(), SerializationError> {
-        self.B.serialize_compressed(&mut w)?;
-        self.grand_product_proof.serialize(&mut w)?;
-        Ok(())
-    }
-
-    pub fn deserialize<R: Read>(mut r: R, log2_n: usize) -> Result<Self, SerializationError> {
-        Ok(Self {
-            B: G1Projective::deserialize_compressed(&mut r)?,
-            grand_product_proof: GrandProductProof::deserialize(&mut r, log2_n)?,
-        })
-    }
+    
 }
 
 #[cfg(test)]
