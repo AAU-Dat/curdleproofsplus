@@ -66,7 +66,7 @@ impl SameMultiscalarProof {
         rng: &mut T,
     ) -> SameMultiscalarProof {
         let mut n = vec_x.len();
-        let lg_n = ark_std::log2(n) as usize;
+        let lg_n = n.next_power_of_two().trailing_zeros() as usize;
 
         let mut vec_L_T = Vec::with_capacity(lg_n);
         let mut vec_R_T = Vec::with_capacity(lg_n);
@@ -76,7 +76,7 @@ impl SameMultiscalarProof {
         let mut vec_R_A = Vec::with_capacity(lg_n);
 
         let vec_r: Vec<Fr> = generate_blinders(rng, n);
-
+        
         let B_a = msm(&crs_G_vec, &vec_r);
         let B_t = msm(&vec_T, &vec_r);
         let B_u = msm(&vec_U, &vec_r);
@@ -95,7 +95,93 @@ impl SameMultiscalarProof {
         let mut slice_U = &mut vec_U[..];
         let mut slice_G = &mut crs_G_vec[..];
 
-        // Step 2: log(n) rounds of recursion
+        // Step 2: log(n)-ceil rounds of recursion
+        let n_first = n.next_power_of_two() >> 1; // bitshifting
+        let n_fold = n - n_first;
+        let i_start = (n_first - n_fold) >> 1;
+        let i_end = i_start + n_fold;
+        
+        if slice_x.len() != 1 {
+            let (x_first, x_R) = slice_x.split_at_mut(n_first);
+            let x_L = &mut x_first[i_start..i_end];
+            let (T_first, T_R) = slice_T.split_at_mut(n_first);
+            let T_L = &mut T_first[i_start..i_end];
+            let (U_first, U_R) = slice_U.split_at_mut(n_first);
+            let U_L = &mut U_first[i_start..i_end];
+            let (G_first, G_R) = slice_G.split_at_mut(n_first);
+            let G_L = &mut G_first[i_start..i_end];
+            
+            let L_A = msm(G_R, x_L);
+            let L_T = msm(T_R, x_L);
+            let L_U = msm(U_R, x_L);
+            let R_A = msm(G_L, x_R);
+            let R_T = msm(T_L, x_R);
+            let R_U = msm(U_L, x_R);
+
+            vec_L_A.push(L_A);
+            vec_L_T.push(L_T);
+            vec_L_U.push(L_U);
+            vec_R_A.push(R_A);
+            vec_R_T.push(R_T);
+            vec_R_U.push(R_U);
+
+            transcript.append_list(b"same_msm_loop", &[&L_A, &L_T, &L_U, &R_A, &R_T, &R_U]);
+            let gamma = transcript.get_and_append_challenge(b"same_msm_gamma");
+            let gamma_inv = gamma.inverse().expect("gamma must have an inverse");
+
+            // Fold vectors and basis
+            for i in 0..n_fold {
+                x_L[i] += gamma_inv * x_R[i];
+                T_L[i] = (T_L[i] + T_R[i].mul(gamma)).into_affine();
+                U_L[i] = (U_L[i] + U_R[i].mul(gamma)).into_affine();
+                G_L[i] = (G_L[i] + G_R[i].mul(gamma)).into_affine();
+            }
+            n = n_first;
+            slice_x = x_first;
+            slice_T = T_first;
+            slice_U = U_first;
+            slice_G = G_first;
+        }
+        
+        if n != 1 {
+            n /= 2;
+
+            let (x_L, x_R) = slice_x.split_at_mut(n);
+            let (T_L, T_R) = slice_T.split_at_mut(n);
+            let (U_L, U_R) = slice_U.split_at_mut(n);
+            let (G_L, G_R) = slice_G.split_at_mut(n);
+            
+            let L_A = msm(G_R, x_L);
+            let L_T = msm(T_R, x_L);
+            let L_U = msm(U_R, x_L);
+            let R_A = msm(G_L, x_R);
+            let R_T = msm(T_L, x_R);
+            let R_U = msm(U_L, x_R);
+
+            vec_L_A.push(L_A);
+            vec_L_T.push(L_T);
+            vec_L_U.push(L_U);
+            vec_R_A.push(R_A);
+            vec_R_T.push(R_T);
+            vec_R_U.push(R_U);
+
+            transcript.append_list(b"same_msm_loop", &[&L_A, &L_T, &L_U, &R_A, &R_T, &R_U]);
+            let gamma = transcript.get_and_append_challenge(b"same_msm_gamma");
+            let gamma_inv = gamma.inverse().expect("gamma must have an inverse");
+
+            // Fold vectors and basis
+            for i in 0..n {
+                x_L[i] += gamma_inv * x_R[i];
+                T_L[i] = (T_L[i] + T_R[i].mul(gamma)).into_affine();
+                U_L[i] = (U_L[i] + U_R[i].mul(gamma)).into_affine();
+                G_L[i] = (G_L[i] + G_R[i].mul(gamma)).into_affine();
+            }
+            slice_x = x_L;
+            slice_T = T_L;
+            slice_U = U_L;
+            slice_G = G_L;
+        }
+        
         while slice_x.len() > 1 {
             n /= 2;
 
@@ -103,7 +189,7 @@ impl SameMultiscalarProof {
             let (T_L, T_R) = slice_T.split_at_mut(n);
             let (U_L, U_R) = slice_U.split_at_mut(n);
             let (G_L, G_R) = slice_G.split_at_mut(n);
-
+            
             let L_A = msm(G_R, x_L);
             let L_T = msm(T_R, x_L);
             let L_U = msm(U_R, x_L);
@@ -160,9 +246,10 @@ impl SameMultiscalarProof {
         if lg_n >= 32 {
             return Err(ProofError::VerificationError);
         }
-        if n != (1 << lg_n) {
+        // Doesn't need to be power of 2
+        /*if n != (1 << lg_n) {
             return Err(ProofError::VerificationError);
-        }
+        }*/
 
         let bitstring = get_verification_scalars_bitstring(n, lg_n);
 
@@ -302,6 +389,63 @@ mod tests {
         let mut transcript_prover = merlin::Transcript::new(b"same_msm");
 
         let n = 128;
+
+        let crs_G_vec: Vec<_> = iter::repeat_with(|| G1Projective::rand(&mut rng).into_affine())
+            .take(n)
+            .collect();
+
+        let vec_T: Vec<_> = iter::repeat_with(|| G1Projective::rand(&mut rng).into_affine())
+            .take(n)
+            .collect();
+        let vec_U: Vec<_> = iter::repeat_with(|| G1Projective::rand(&mut rng).into_affine())
+            .take(n)
+            .collect();
+
+        let vec_x: Vec<Fr> = iter::repeat_with(|| rng.gen()).take(n).collect();
+
+        let A = msm(&crs_G_vec, &vec_x);
+        let Z_t = msm(&vec_T, &vec_x);
+        let Z_u = msm(&vec_U, &vec_x);
+
+        let proof = SameMultiscalarProof::new(
+            crs_G_vec.clone(),
+            A.clone(),
+            Z_t.clone(),
+            Z_u.clone(),
+            vec_T.clone(),
+            vec_U.clone(),
+            vec_x,
+            &mut transcript_prover,
+            &mut rng,
+        );
+
+        // Reset the FS
+        let mut transcript_verifier = merlin::Transcript::new(b"same_msm");
+        let mut msm_accumulator = MsmAccumulator::new();
+
+        assert!(proof
+            .verify(
+                &crs_G_vec,
+                A,
+                Z_t,
+                Z_u,
+                &vec_T,
+                &vec_U,
+                &mut transcript_verifier,
+                &mut msm_accumulator,
+                &mut rng,
+            )
+            .is_ok());
+
+        assert!(msm_accumulator.verify().is_ok())
+    }
+
+    #[test]
+    fn test_same_msm_argument_100() {
+        let mut rng = StdRng::seed_from_u64(0u64);
+        let mut transcript_prover = merlin::Transcript::new(b"same_msm");
+
+        let n = 100;
 
         let crs_G_vec: Vec<_> = iter::repeat_with(|| G1Projective::rand(&mut rng).into_affine())
             .take(n)

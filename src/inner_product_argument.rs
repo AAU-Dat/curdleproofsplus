@@ -32,6 +32,10 @@ pub struct InnerProductProof {
 
     c_final: Fr,
     d_final: Fr,
+    GPrimeS: Vec<G1Affine>,
+    pub GS: Vec<G1Affine>,
+    pub cS: Vec<Fr>,
+    pub dS: Vec<Fr>,
 }
 
 /// Generate two blinder vectors `r` and `z` that satisfy the following constraints:
@@ -111,9 +115,9 @@ impl InnerProductProof {
         rng: &mut T,
     ) -> InnerProductProof {
         let mut n = vec_c.len();
-        let lg_n = ark_std::log2(n) as usize;
+        let lg_n = n.next_power_of_two().trailing_zeros() as usize;
         assert_eq!(vec_d.len(), n);
-        assert!(n.is_power_of_two());
+        // assert!(n.is_power_of_two());
 
         let mut vec_L_C = Vec::with_capacity(lg_n);
         let mut vec_R_C = Vec::with_capacity(lg_n);
@@ -139,6 +143,37 @@ impl InnerProductProof {
         }
         let H = crs_H.mul(beta);
 
+        // Find out where to divide the vectors
+
+        let n_first = n.next_power_of_two() >> 1; // bitshifting
+        let n_fold = n - n_first;
+        let i_start = (n_first - n_fold) >> 1;
+        let i_end = i_start + n_fold;
+
+        let GS: Vec<G1Affine> = crs_G_vec[..i_start]
+            .iter()
+            .chain(crs_G_vec[i_end..].iter())
+            .cloned()
+            .collect();
+        
+        let GPrimeS: Vec<G1Affine> = crs_G_prime_vec[..i_start]
+            .iter()
+            .chain(crs_G_prime_vec[i_end..].iter())
+            .cloned()
+            .collect();
+        
+        let cS: Vec<Fr> = vec_c[..i_start]
+            .iter()
+            .chain(vec_c[i_end..].iter())
+            .cloned()
+            .collect();
+        
+        let dS: Vec<Fr> = vec_d[..i_start]
+            .iter()
+            .chain(vec_d[i_end..].iter())
+            .cloned()
+            .collect();
+
         // Step 2
         // Create slices backed by their respective vectors.  This lets us reslice as we compress the lengths of the
         // vectors in the main loop below.
@@ -146,6 +181,111 @@ impl InnerProductProof {
         let mut slice_G_prime = &mut crs_G_prime_vec[..];
         let mut slice_c = &mut vec_c[..];
         let mut slice_d = &mut vec_d[..];
+        
+        // SIPA STEPS
+        // Handle n = 1
+        if n == 1 {
+            return InnerProductProof {
+                B_c,
+                B_d,
+                vec_L_C,
+                vec_R_C,
+                vec_L_D,
+                vec_R_D,
+                c_final: slice_c[0],
+                d_final: slice_d[0],
+                GS,
+                GPrimeS,
+                cS,
+                dS
+            };
+        }
+
+        // Comment from SP:
+        // If it's the first or second iteration, unroll the Hprime = H*y_inv scalar mults
+        // into multiscalar muls, for performance.
+        
+        if n != 1 {
+            // Split corresponding to the SP formula
+            let (c_first, c_R) = slice_c.split_at_mut(n_first);
+            let c_L = &mut c_first[i_start..i_end];
+            let (d_first, d_R) = slice_d.split_at_mut(n_first);
+            let d_L = &mut d_first[i_start..i_end];
+            let (G_first, G_R) = slice_G.split_at_mut(n_first);
+            let G_L = &mut G_first[i_start..i_end];
+            let (G_prime_first, G_prime_R) = slice_G_prime.split_at_mut(n_first);
+            let G_prime_L = &mut G_prime_first[i_start..i_end];
+
+            
+            let L_C = msm(G_R, c_L) + H.mul(inner_product(c_L, d_R));
+            let L_D = msm(G_prime_L, d_R);
+            let R_C = msm(G_L, c_R) + H.mul(inner_product(c_R, d_L));
+            let R_D = msm(G_prime_R, d_L);
+
+            // Append elements to the proof
+            vec_L_C.push(L_C);
+            vec_L_D.push(L_D);
+            vec_R_C.push(R_C);
+            vec_R_D.push(R_D);
+
+            transcript.append_list(b"ipa_loop", &[&L_C, &L_D, &R_C, &R_D]);
+            let gamma = transcript.get_and_append_challenge(b"ipa_gamma");
+            let gamma_inv = gamma.inverse().expect("gamma must have an inverse");
+
+            // Fold input vectors and basis
+            for i in 0..n_fold {
+                c_L[i] += gamma_inv * c_R[i];
+                d_L[i] += gamma * d_R[i];
+                G_L[i] = (G_L[i] + G_R[i].mul(gamma)).into_affine();
+                G_prime_L[i] = (G_prime_L[i] + G_prime_R[i].mul(gamma_inv)).into_affine();
+            }
+
+
+
+            n = n_first;
+            slice_c = c_first;
+            slice_d = d_first;
+            slice_G = G_first;
+            slice_G_prime = G_prime_first;
+        }
+
+        if n != 1 {
+            n = n / 2;
+            let (c_L, c_R) = slice_c.split_at_mut(n);
+            let (d_L, d_R) = slice_d.split_at_mut(n);
+            let (G_L, G_R) = slice_G.split_at_mut(n);
+            let (G_prime_L, G_prime_R) = slice_G_prime.split_at_mut(n);
+            
+            let L_C = msm(G_R, c_L) + H.mul(inner_product(c_L, d_R));
+            let L_D = msm(G_prime_L, d_R);
+            let R_C = msm(G_L, c_R) + H.mul(inner_product(c_R, d_L));
+            let R_D = msm(G_prime_R, d_L);
+
+            // Append elements to the proof
+            vec_L_C.push(L_C);
+            vec_L_D.push(L_D);
+            vec_R_C.push(R_C);
+            vec_R_D.push(R_D);
+
+            transcript.append_list(b"ipa_loop", &[&L_C, &L_D, &R_C, &R_D]);
+            let gamma = transcript.get_and_append_challenge(b"ipa_gamma");
+            let gamma_inv = gamma.inverse().expect("gamma must have an inverse");
+            // Fold input vectors and basis
+            for i in 0..n {
+                c_L[i] += gamma_inv * c_R[i];
+                d_L[i] += gamma * d_R[i];
+                G_L[i] = (G_L[i] + G_R[i].mul(gamma)).into_affine();
+                G_prime_L[i] = (G_prime_L[i] + G_prime_R[i].mul(gamma_inv)).into_affine();
+            }
+
+            // Save the rescaled vector for splitting in the next loop
+            slice_c = c_L;
+            slice_d = d_L;
+            slice_G = G_L;
+            slice_G_prime = G_prime_L;
+
+        }
+        
 
         while slice_c.len() > 1 {
             n /= 2;
@@ -154,7 +294,6 @@ impl InnerProductProof {
             let (d_L, d_R) = slice_d.split_at_mut(n);
             let (G_L, G_R) = slice_G.split_at_mut(n);
             let (G_prime_L, G_prime_R) = slice_G_prime.split_at_mut(n);
-
             let L_C = msm(G_R, c_L) + H.mul(inner_product(c_L, d_R));
             let L_D = msm(G_prime_L, d_R);
             let R_C = msm(G_L, c_R) + H.mul(inner_product(c_R, d_L));
@@ -194,6 +333,10 @@ impl InnerProductProof {
             vec_R_D,
             c_final: slice_c[0],
             d_final: slice_d[0],
+            GS,
+            GPrimeS,
+            cS,
+            dS
         }
     }
 
@@ -204,13 +347,17 @@ impl InnerProductProof {
         n: usize,
         transcript: &mut Transcript,
     ) -> Result<(Vec<Fr>, Vec<Fr>, Vec<Fr>, Vec<Fr>), ProofError> {
+        println!("hell1?");
         let lg_n = self.vec_L_C.len();
+        println!("hell2?: {}",lg_n);
         if lg_n >= 32 {
+            println!("hell3?");
             return Err(ProofError::VerificationError);
         }
-        if n != (1 << lg_n) {
+        /*if n != (1 << lg_n) {
+            println!("hell4?");
             return Err(ProofError::VerificationError);
-        }
+        }*/
 
         let verification_scalars_bitstring = get_verification_scalars_bitstring(n, lg_n);
 
@@ -277,14 +424,18 @@ impl InnerProductProof {
         rng: &mut T,
     ) -> Result<(), ProofError> {
         let n = crs_G_vec.len();
-        assert!(n.is_power_of_two());
+        //assert!(n.is_power_of_two());
 
+        
         // Step 1:
         transcript.append_list(b"ipa_step1", &[&C, &D]);
         transcript.append(b"ipa_step1", &z);
         transcript.append_list(b"ipa_step1", &[&self.B_c, &self.B_d]);
         let alpha = transcript.get_and_append_challenge(b"ipa_alpha");
         let beta = transcript.get_and_append_challenge(b"ipa_beta");
+
+        //let C = C - msm(&self.GS, &self.cS);
+        //let D = D - msm(&self.GPrimeS, &self.dS);
 
         // Step 2
         let (vec_gamma, vec_gamma_inv, vec_s, vec_inv_s) =
@@ -305,9 +456,7 @@ impl InnerProductProof {
         let point_lhs = msm_from_projective(&self.vec_L_C, &vec_gamma)
             + C_a
             + msm_from_projective(&self.vec_R_C, &vec_gamma_inv);
-
         msm_accumulator.accumulate_check(&point_lhs, &vec_rhs_scalars, &vec_G_H, rng);
-
         // Get vector of d*((1/s_i) * u_i) for the second accumulated check
         let vec_d_div_s: Vec<Fr> = vec_inv_s
             .into_iter()
@@ -321,7 +470,6 @@ impl InnerProductProof {
             + msm_from_projective(&self.vec_R_D, &vec_gamma_inv);
 
         msm_accumulator.accumulate_check(&point_lhs, &vec_d_div_s, crs_G_vec, rng);
-
         Ok(())
     }
 
@@ -347,6 +495,10 @@ impl InnerProductProof {
             vec_R_D: deserialize_g1projective_vec(&mut r, log2_n)?,
             c_final: Fr::deserialize_compressed(&mut r)?,
             d_final: Fr::deserialize_compressed(&mut r)?,
+            GPrimeS: vec![],
+            GS: vec![],
+            cS: vec![],
+            dS: vec![],
         })
     }
 }
@@ -359,6 +511,92 @@ mod tests {
     use core::iter;
 
     use crate::msm_accumulator::MsmAccumulator;
+
+    #[test]
+    fn test_inner_product_argument_n_62() {
+        let mut rng = StdRng::seed_from_u64(0u64);
+        let mut transcript_prover = merlin::Transcript::new(b"IPA");
+
+        let n = 62;
+
+        let crs_G_vec: Vec<G1Affine> =
+            iter::repeat_with(|| G1Projective::rand(&mut rng).into_affine())
+                .take(n)
+                .collect();
+        // There is actually a relationship between crs_G_vec and crs_G_prime_vec because of the grandproduct optimization
+        // We generate a `vec_u` which has the discrete logs of every crs_G_prime element with respect to crs_G
+        let vec_u = generate_blinders(&mut rng, n);
+        let crs_G_prime_vec: Vec<G1Affine> = crs_G_vec
+            .iter()
+            .zip(&vec_u)
+            .map(|(G_i, u_i)| G_i.mul(*u_i).into_affine())
+            .collect();
+        let crs_H = G1Projective::rand(&mut rng);
+
+        // Generate some random vectors
+        let vec_b: Vec<Fr> = iter::repeat_with(|| rng.gen()).take(n).collect();
+        let vec_c: Vec<Fr> = iter::repeat_with(|| rng.gen()).take(n).collect();
+
+        let z = inner_product(&vec_b, &vec_c);
+
+        // Create commitments
+        let B = msm(&crs_G_vec, &vec_b);
+        let C = msm(&crs_G_prime_vec, &vec_c);
+
+        let proof = InnerProductProof::new(
+            crs_G_vec.clone(),
+            crs_G_prime_vec.clone(),
+            &crs_H,
+            B.clone(),
+            C.clone(),
+            z,
+            vec_b.clone(),
+            vec_c.clone(),
+            &mut transcript_prover,
+            &mut rng,
+        );
+
+        // Reset the FS
+        let mut transcript_verifier = merlin::Transcript::new(b"IPA");
+        let mut msm_accumulator = MsmAccumulator::new();
+
+        assert!(proof
+            .verify(
+                &crs_G_vec,
+                &crs_H,
+                B,
+                C,
+                z,
+                vec_u.clone(),
+                &mut transcript_verifier,
+                &mut msm_accumulator,
+                &mut rng,
+            )
+            .is_ok());
+
+        assert!(msm_accumulator.verify().is_ok());
+
+        ////////////////////////////////////////////////////
+        // Let's also try a basic bad proof test where we provide the wrong inner product result to the verifeir
+        let mut transcript_verifier = merlin::Transcript::new(b"IPA");
+        let mut msm_accumulator = MsmAccumulator::new();
+
+        assert!(proof
+            .verify(
+                &crs_G_vec,
+                &crs_H,
+                B,
+                C,
+                z + Fr::one(),
+                vec_u,
+                &mut transcript_verifier,
+                &mut msm_accumulator,
+                &mut rng,
+            )
+            .is_ok());
+
+        assert!(msm_accumulator.verify().is_err());
+    }
 
     #[test]
     fn test_inner_product_argument() {

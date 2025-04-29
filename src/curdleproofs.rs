@@ -241,6 +241,8 @@ impl CurdleproofsProof {
             rng,
         )?;
 
+        println!("done1");
+
         // Step 3
         self.same_scalar_proof.verify(
             &crs.G_t,
@@ -252,6 +254,8 @@ impl CurdleproofsProof {
             self.cm_U,
             &mut transcript,
         )?;
+
+        println!("done2");
 
         // Step 4
         let A_prime = self.A + self.cm_T.T_1 + self.cm_U.T_1;
@@ -288,6 +292,7 @@ impl CurdleproofsProof {
             &mut msm_accumulator,
             rng,
         )?;
+        println!("done3");
 
         // Finally check the correctness of R and S
         msm_accumulator.accumulate_check(&self.R, &vec_a, vec_R, rng);

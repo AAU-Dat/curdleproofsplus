@@ -74,7 +74,8 @@ impl GrandProductProof {
 
         let vec_c_blinders = generate_blinders(rng, n_blinders); // vec_r_c in the paper
         let C = msm(crs_G_vec, &vec_c) + msm(crs_H_vec, &vec_c_blinders);
-
+        
+        
         // Compute r_p
         let vec_r_b_plus_alpha: Vec<Fr> =
             vec_b_blinders.iter().map(|r_b_i| *r_b_i + alpha).collect();
@@ -141,7 +142,7 @@ impl GrandProductProof {
         let inner_prod =
             r_p * beta.pow([(ell + 1) as u64]) + gprod_result * beta.pow([ell as u64]) - Fr::one();
 
-        vec_c.extend(vec_c_blinders);
+        vec_c.extend(&vec_c_blinders);
         vec_d.extend(vec_d_blinders);
 
         // Sanity checks

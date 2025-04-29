@@ -200,7 +200,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(0u64);
         let mut transcript_prover = merlin::Transcript::new(b"sameperm");
 
-        let n = 128;
+        let n = 126;
         let n_blinders = 4;
         let ell = n - n_blinders;
 
