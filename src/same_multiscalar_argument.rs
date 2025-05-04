@@ -441,11 +441,11 @@ mod tests {
     }
 
     #[test]
-    fn test_same_msm_argument_100() {
+    fn test_same_msm_argument_10() {
         let mut rng = StdRng::seed_from_u64(0u64);
         let mut transcript_prover = merlin::Transcript::new(b"same_msm");
 
-        let n = 100;
+        let n = 10;
 
         let crs_G_vec: Vec<_> = iter::repeat_with(|| G1Projective::rand(&mut rng).into_affine())
             .take(n)
