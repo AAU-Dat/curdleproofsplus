@@ -38,74 +38,54 @@ pub fn generate_blinders<T: RngCore>(rng: &mut T, n: usize) -> Vec<Fr> {
 ///
 /// TODO: This can be done more efficiently
 pub fn get_verification_scalars_bitstring(n: usize, logn: usize) -> Vec<Vec<usize>> {
-    // Initialize gamma tracker: gamma_tracker[i] stores the list of gamma rounds applied to original index i.
-    let mut bitstring: Vec<Vec<usize>> = vec![Vec::new(); n];
+    // Initialize the result vector: bitstring[i] stores the list of gamma rounds applied to original index i.
+    // Capacity estimation: Max length of inner vec is logn.
+    let mut bitstring: Vec<Vec<usize>> = vec![Vec::with_capacity(logn); n];
 
-    // Initialize map: current_map[k] holds the list of *original indices* contributing to position k
-    // in the vector of the current iteration.
-    let mut current_map: Vec<Vec<usize>> = (0..n).map(|i| vec![i]).collect();
-    let mut current_n = n; // Size of the vector in the current iteration.
+    // Keep track of the original indices that are still present in the (shrinking) vector.
+    // We only need to store the positions relevant for the *next* size `n_first`.
+    let mut active_positions: Vec<(usize, usize)> = (0..n).map(|i| (i, i)).collect(); // Stores (original_index, current_position_k)
 
-    for j in 0..logn { // Iterate through gamma rounds (j=0 -> gamma0, j=1 -> gamma1, ...)
+    // Size of the vector in the current iteration.
+    let mut current_n = n;
+
+    // --- Simulate the folding process round by round ---
+    for j in 0..logn {
         // --- Calculate folding parameters for the current vector size `current_n` ---
         let n_power_of_2 = current_n.next_power_of_two();
-        let n_first = n_power_of_2 >> 1;
-        let n_fold = current_n - n_first;
-        let ih = (n_first - n_fold) / 2;
-        let it = ih + n_fold;
+        let n_first = n_power_of_2 >> 1; // Size of the first half (and the vector in the next round)
 
-        // --- Identify T and S ranges based on *current* indices (k = 0 to current_n - 1) ---
-        // --- Apply gamma j ---
-        for k_source in n_first..current_n {
-            // k_source is the position index in the *current* vector (current_map)
-            if k_source < current_map.len() { // Safety bounds check
-                // Iterate through all original indices currently mapped to this position
-                for &original_index in &current_map[k_source] {
-                    // Record that gamma j was applied to this original index
-                    if original_index < bitstring.len() { // Safety bounds check
-                        bitstring[original_index].push(j);
-                    }
-                }
+        // Calculate parameters related to the "folding" range (T)
+        let n_fold = current_n - n_first; 
+        let n_dont_fold = n_first - n_fold;
+        let ih = n_dont_fold / 2;
+
+
+        // --- Prepare for the next iteration ---
+        let mut next_active_positions = Vec::with_capacity(n_first);
+
+        // --- Process each active element from the *current* round ---
+        for &(original_index, k) in &active_positions {
+            // --- Determine if the element is folded in this round (j) ---
+            if k >= n_first {
+                // Record that gamma `j` was applied to this original index.
+                bitstring[original_index].push(j);
             }
-        }
 
-        // --- Prepare the map for the next iteration ---
-        // Simulate the concatenation: I_next = S_left + T_folded + S_right
-        let mut next_map: Vec<Vec<usize>> = Vec::with_capacity(n_first); // Max possible size after folding
+            // --- Calculate the position for the next round ---
+            let new_pos = if k >= n_first {
+                k - n_first + ih
+            } else {
+                k
+            };
 
-        // 1. Concatenate S_left part (original indices from positions 0 to i_start_fold_target - 1)
-        for k in 0..ih {
-            if k < current_map.len() { // Safety bounds check
-                next_map.push(current_map[k].clone()); // Clone the list of original indices
-            }
-        }
-
-        // 2. Concatenate Folded T part
-        // Iterate through the target positions (left side of T)
-        for k_target in ih..it {
-            // Find the corresponding source position on the right side of T
-            let k_source = k_target - ih + n_first;
-
-            if k_target < current_map.len() && k_source < current_map.len() { // Safety bounds check
-                // Create the new combined list of original indices for the folded position.
-                // The new position (index in next_map corresponding to k_target)
-                // inherits the history (original indices) from both k_target and k_source.
-                let mut combined_history = current_map[k_target].clone();
-                combined_history.extend(current_map[k_source].iter().cloned());
-                next_map.push(combined_history);
-            }
-        }
-
-        // 3. Concatenate S_right part (original indices from positions i_end_fold_target to n_first - 1)
-        for k in it..n_first {
-            if k < current_map.len() { // Safety bounds check
-                next_map.push(current_map[k].clone()); // Clone the list of original indices
-            }
+            // --- Store result for the next iteration ---
+            next_active_positions.push((original_index, new_pos));
         }
 
         // --- Update state for the next iteration ---
-        current_map = next_map;
-        current_n = current_map.len(); // Update the size for the next round's calculations
+        active_positions = next_active_positions; 
+        current_n = n_first;
     }
 
     bitstring
