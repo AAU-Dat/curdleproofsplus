@@ -26,7 +26,7 @@ fn apply_permutation_group(vec_a: Vec<G1Affine>, permutation: &Vec<u32>) -> Vec<
 fn benchmark_shuffle(c: &mut Criterion) {
     let mut rng = StdRng::seed_from_u64(0u64);
 
-    let N = 128;
+    let N = 512;
     let N_BLINDERS = 4;
     let ell = N - N_BLINDERS;
 
