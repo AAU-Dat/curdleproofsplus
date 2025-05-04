@@ -63,7 +63,6 @@ impl MsmAccumulator {
         if (msm(&bases, &scalars) - self.A_c).is_zero() {
             Ok(())
         } else {
-            println!("yup");
             Err(ProofError::VerificationError)
         }
     }
