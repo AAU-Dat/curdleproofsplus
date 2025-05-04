@@ -32,10 +32,6 @@ pub struct InnerProductProof {
 
     c_final: Fr,
     d_final: Fr,
-    GPrimeS: Vec<G1Affine>,
-    pub GS: Vec<G1Affine>,
-    pub cS: Vec<Fr>,
-    pub dS: Vec<Fr>,
 }
 
 /// Generate two blinder vectors `r` and `z` that satisfy the following constraints:
@@ -150,30 +146,6 @@ impl InnerProductProof {
         let i_start = (n_first - n_fold) >> 1;
         let i_end = i_start + n_fold;
 
-        let GS: Vec<G1Affine> = crs_G_vec[..i_start]
-            .iter()
-            .chain(crs_G_vec[i_end..].iter())
-            .cloned()
-            .collect();
-        
-        let GPrimeS: Vec<G1Affine> = crs_G_prime_vec[..i_start]
-            .iter()
-            .chain(crs_G_prime_vec[i_end..].iter())
-            .cloned()
-            .collect();
-        
-        let cS: Vec<Fr> = vec_c[..i_start]
-            .iter()
-            .chain(vec_c[i_end..].iter())
-            .cloned()
-            .collect();
-        
-        let dS: Vec<Fr> = vec_d[..i_start]
-            .iter()
-            .chain(vec_d[i_end..].iter())
-            .cloned()
-            .collect();
-
         // Step 2
         // Create slices backed by their respective vectors.  This lets us reslice as we compress the lengths of the
         // vectors in the main loop below.
@@ -194,10 +166,6 @@ impl InnerProductProof {
                 vec_R_D,
                 c_final: slice_c[0],
                 d_final: slice_d[0],
-                GS,
-                GPrimeS,
-                cS,
-                dS
             };
         }
 
@@ -287,13 +255,14 @@ impl InnerProductProof {
         }
         
 
-        while slice_c.len() > 1 {
-            n /= 2;
+        while n != 1 {
+            n = n / 2;
 
             let (c_L, c_R) = slice_c.split_at_mut(n);
             let (d_L, d_R) = slice_d.split_at_mut(n);
             let (G_L, G_R) = slice_G.split_at_mut(n);
             let (G_prime_L, G_prime_R) = slice_G_prime.split_at_mut(n);
+            
             let L_C = msm(G_R, c_L) + H.mul(inner_product(c_L, d_R));
             let L_D = msm(G_prime_L, d_R);
             let R_C = msm(G_L, c_R) + H.mul(inner_product(c_R, d_L));
@@ -333,10 +302,6 @@ impl InnerProductProof {
             vec_R_D,
             c_final: slice_c[0],
             d_final: slice_d[0],
-            GS,
-            GPrimeS,
-            cS,
-            dS
         }
     }
 
@@ -347,17 +312,10 @@ impl InnerProductProof {
         n: usize,
         transcript: &mut Transcript,
     ) -> Result<(Vec<Fr>, Vec<Fr>, Vec<Fr>, Vec<Fr>), ProofError> {
-        println!("hell1?");
         let lg_n = self.vec_L_C.len();
-        println!("hell2?: {}",lg_n);
         if lg_n >= 32 {
-            println!("hell3?");
             return Err(ProofError::VerificationError);
         }
-        /*if n != (1 << lg_n) {
-            println!("hell4?");
-            return Err(ProofError::VerificationError);
-        }*/
 
         let verification_scalars_bitstring = get_verification_scalars_bitstring(n, lg_n);
 
@@ -389,7 +347,7 @@ impl InnerProductProof {
             }
         }
 
-        // 4. Also compute 1/s vector
+        // 4. Also compute 1/s vector        
         let mut vec_inv_s = vec_s.clone();
         batch_inversion(&mut vec_inv_s);
 
@@ -468,7 +426,7 @@ impl InnerProductProof {
         let point_lhs = msm_from_projective(&self.vec_L_D, &vec_gamma)
             + D_a
             + msm_from_projective(&self.vec_R_D, &vec_gamma_inv);
-
+        
         msm_accumulator.accumulate_check(&point_lhs, &vec_d_div_s, crs_G_vec, rng);
         Ok(())
     }
@@ -495,10 +453,6 @@ impl InnerProductProof {
             vec_R_D: deserialize_g1projective_vec(&mut r, log2_n)?,
             c_final: Fr::deserialize_compressed(&mut r)?,
             d_final: Fr::deserialize_compressed(&mut r)?,
-            GPrimeS: vec![],
-            GS: vec![],
-            cS: vec![],
-            dS: vec![],
         })
     }
 }
@@ -511,6 +465,219 @@ mod tests {
     use core::iter;
 
     use crate::msm_accumulator::MsmAccumulator;
+    
+    fn testhelper(n_param: usize) {
+        let mut rng = StdRng::seed_from_u64(0u64);
+        let mut transcript_prover = merlin::Transcript::new(b"IPA");
+
+        let n = n_param;
+
+        let crs_G_vec: Vec<G1Affine> =
+            iter::repeat_with(|| G1Projective::rand(&mut rng).into_affine())
+                .take(n)
+                .collect();
+        // There is actually a relationship between crs_G_vec and crs_G_prime_vec because of the grandproduct optimization
+        // We generate a `vec_u` which has the discrete logs of every crs_G_prime element with respect to crs_G
+        let vec_u = generate_blinders(&mut rng, n);
+        let crs_G_prime_vec: Vec<G1Affine> = crs_G_vec
+            .iter()
+            .zip(&vec_u)
+            .map(|(G_i, u_i)| G_i.mul(*u_i).into_affine())
+            .collect();
+        let crs_H = G1Projective::rand(&mut rng);
+
+        // Generate some random vectors
+        let vec_b: Vec<Fr> = iter::repeat_with(|| rng.gen()).take(n).collect();
+        let vec_c: Vec<Fr> = iter::repeat_with(|| rng.gen()).take(n).collect();
+
+        let z = inner_product(&vec_b, &vec_c);
+
+        // Create commitments
+        let B = msm(&crs_G_vec, &vec_b);
+        let C = msm(&crs_G_prime_vec, &vec_c);
+
+        let proof = InnerProductProof::new(
+            crs_G_vec.clone(),
+            crs_G_prime_vec.clone(),
+            &crs_H,
+            B.clone(),
+            C.clone(),
+            z,
+            vec_b.clone(),
+            vec_c.clone(),
+            &mut transcript_prover,
+            &mut rng,
+        );
+
+        // Reset the FS
+        let mut transcript_verifier = merlin::Transcript::new(b"IPA");
+        let mut msm_accumulator = MsmAccumulator::new();
+
+        assert!(proof
+            .verify(
+                &crs_G_vec,
+                &crs_H,
+                B,
+                C,
+                z,
+                vec_u.clone(),
+                &mut transcript_verifier,
+                &mut msm_accumulator,
+                &mut rng,
+            )
+            .is_ok());
+
+        assert!(msm_accumulator.verify().is_ok());
+
+        ////////////////////////////////////////////////////
+        // Let's also try a basic bad proof test where we provide the wrong inner product result to the verifeir
+        let mut transcript_verifier = merlin::Transcript::new(b"IPA");
+        let mut msm_accumulator = MsmAccumulator::new();
+
+        assert!(proof
+            .verify(
+                &crs_G_vec,
+                &crs_H,
+                B,
+                C,
+                z + Fr::one(),
+                vec_u,
+                &mut transcript_verifier,
+                &mut msm_accumulator,
+                &mut rng,
+            )
+            .is_ok());
+
+        assert!(msm_accumulator.verify().is_err());
+    }
+
+    #[test] fn test2()   { testhelper(2); }
+    #[test] fn test3()   { testhelper(3); }
+    #[test] fn test4()   { testhelper(4); }
+    #[test] fn test5()   { testhelper(5); }
+    #[test] fn test6()   { testhelper(6); }
+    #[test] fn test7()   { testhelper(7); }
+    #[test] fn test8()   { testhelper(8); }
+    #[test] fn test9()   { testhelper(9); }
+    #[test] fn test10()  { testhelper(10); }
+    #[test] fn test11()  { testhelper(11); }
+    #[test] fn test12()  { testhelper(12); }
+    #[test] fn test13()  { testhelper(13); }
+    #[test] fn test14()  { testhelper(14); }
+    #[test] fn test15()  { testhelper(15); }
+    #[test] fn test16()  { testhelper(16); }
+    #[test] fn test17()  { testhelper(17); }
+    #[test] fn test18()  { testhelper(18); }
+    #[test] fn test19()  { testhelper(19); }
+    #[test] fn test20()  { testhelper(20); }
+    #[test] fn test21()  { testhelper(21); }
+    #[test] fn test22()  { testhelper(22); }
+    #[test] fn test23()  { testhelper(23); }
+    #[test] fn test24()  { testhelper(24); }
+    #[test] fn test25()  { testhelper(25); }
+    #[test] fn test26()  { testhelper(26); }
+    #[test] fn test27()  { testhelper(27); }
+    #[test] fn test28()  { testhelper(28); }
+    #[test] fn test29()  { testhelper(29); }
+    #[test] fn test30()  { testhelper(30); }
+    #[test] fn test31()  { testhelper(31); }
+    #[test] fn test32()  { testhelper(32); }
+    #[test] fn test33()  { testhelper(33); }
+    #[test] fn test34()  { testhelper(34); }
+    #[test] fn test35()  { testhelper(35); }
+    #[test] fn test36()  { testhelper(36); }
+    #[test] fn test37()  { testhelper(37); }
+    #[test] fn test38()  { testhelper(38); }
+    #[test] fn test39()  { testhelper(39); }
+    #[test] fn test40()  { testhelper(40); }
+    #[test] fn test41()  { testhelper(41); }
+    #[test] fn test42()  { testhelper(42); }
+    #[test] fn test43()  { testhelper(43); }
+    #[test] fn test44()  { testhelper(44); }
+    #[test] fn test45()  { testhelper(45); }
+    #[test] fn test46()  { testhelper(46); }
+    #[test] fn test47()  { testhelper(47); }
+    #[test] fn test48()  { testhelper(48); }
+    #[test] fn test49()  { testhelper(49); }
+    #[test] fn test50()  { testhelper(50); }
+    #[test] fn test51()  { testhelper(51); }
+    #[test] fn test52()  { testhelper(52); }
+    #[test] fn test53()  { testhelper(53); }
+    #[test] fn test54()  { testhelper(54); }
+    #[test] fn test55()  { testhelper(55); }
+    #[test] fn test56()  { testhelper(56); }
+    #[test] fn test57()  { testhelper(57); }
+    #[test] fn test58()  { testhelper(58); }
+    #[test] fn test59()  { testhelper(59); }
+    #[test] fn test60()  { testhelper(60); }
+    #[test] fn test61()  { testhelper(61); }
+    #[test] fn test62()  { testhelper(62); }
+    #[test] fn test63()  { testhelper(63); }
+    #[test] fn test64()  { testhelper(64); }
+    #[test] fn test65()  { testhelper(65); }
+    #[test] fn test66()  { testhelper(66); }
+    #[test] fn test67()  { testhelper(67); }
+    #[test] fn test68()  { testhelper(68); }
+    #[test] fn test69()  { testhelper(69); }
+    #[test] fn test70()  { testhelper(70); }
+    #[test] fn test71()  { testhelper(71); }
+    #[test] fn test72()  { testhelper(72); }
+    #[test] fn test73()  { testhelper(73); }
+    #[test] fn test74()  { testhelper(74); }
+    #[test] fn test75()  { testhelper(75); }
+    #[test] fn test76()  { testhelper(76); }
+    #[test] fn test77()  { testhelper(77); }
+    #[test] fn test78()  { testhelper(78); }
+    #[test] fn test79()  { testhelper(79); }
+    #[test] fn test80()  { testhelper(80); }
+    #[test] fn test81()  { testhelper(81); }
+    #[test] fn test82()  { testhelper(82); }
+    #[test] fn test83()  { testhelper(83); }
+    #[test] fn test84()  { testhelper(84); }
+    #[test] fn test85()  { testhelper(85); }
+    #[test] fn test86()  { testhelper(86); }
+    #[test] fn test87()  { testhelper(87); }
+    #[test] fn test88()  { testhelper(88); }
+    #[test] fn test89()  { testhelper(89); }
+    #[test] fn test90()  { testhelper(90); }
+    #[test] fn test91()  { testhelper(91); }
+    #[test] fn test92()  { testhelper(92); }
+    #[test] fn test93()  { testhelper(93); }
+    #[test] fn test94()  { testhelper(94); }
+    #[test] fn test95()  { testhelper(95); }
+    #[test] fn test96()  { testhelper(96); }
+    #[test] fn test97()  { testhelper(97); }
+    #[test] fn test98()  { testhelper(98); }
+    #[test] fn test99()  { testhelper(99); }
+    #[test] fn test100() { testhelper(100); }
+    #[test] fn test101() { testhelper(101); }
+    #[test] fn test102() { testhelper(102); }
+    #[test] fn test103() { testhelper(103); }
+    #[test] fn test104() { testhelper(104); }
+    #[test] fn test105() { testhelper(105); }
+    #[test] fn test106() { testhelper(106); }
+    #[test] fn test107() { testhelper(107); }
+    #[test] fn test108() { testhelper(108); }
+    #[test] fn test109() { testhelper(109); }
+    #[test] fn test110() { testhelper(110); }
+    #[test] fn test111() { testhelper(111); }
+    #[test] fn test112() { testhelper(112); }
+    #[test] fn test113() { testhelper(113); }
+    #[test] fn test114() { testhelper(114); }
+    #[test] fn test115() { testhelper(115); }
+    #[test] fn test116() { testhelper(116); }
+    #[test] fn test117() { testhelper(117); }
+    #[test] fn test118() { testhelper(118); }
+    #[test] fn test119() { testhelper(119); }
+    #[test] fn test120() { testhelper(120); }
+    #[test] fn test121() { testhelper(121); }
+    #[test] fn test122() { testhelper(122); }
+    #[test] fn test123() { testhelper(123); }
+    #[test] fn test124() { testhelper(124); }
+    #[test] fn test125() { testhelper(125); }
+    #[test] fn test126() { testhelper(126); }
+    #[test] fn test127() { testhelper(127); }
+    #[test] fn test128() { testhelper(128); }
 
     #[test]
     fn test_inner_product_argument_n_62() {
