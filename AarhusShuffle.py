@@ -62,21 +62,17 @@ def run_experiments(num_trials=1000, n=16384, k=128, T=8192, alpha=8192):
 
     first_success_indices = [lst.index("success") for lst in result]
 
-    pcts = [20, 40, 60, 80, 100]
-
-    ps = np.percentile(first_success_indices, pcts, method='nearest').astype(int)
-
-    res = ""
-    for p, idx in zip(pcts, ps):
-        res += str(idx) + ","
-    with open("results.txt", "a") as f:
-        f.write(f"{k},{alpha}," + res + "\n")
+    f = open("results.txt", "a")
+    for value in first_success_indices:
+        f.write(f"{k},{alpha},{value}\n")
+    f.close()
 
 
 def benchmark_run():
-    with open("results.txt", "a") as f:
-        f.write("k,alpha,20pt,40pt,60pt,80pt,100pt,\n")
-    for k in range(64, 129):
+    f = open("results.txt", "a")
+    f.write("k,alpha,value\n")
+    f.close()
+    for k in range(32, 513):
         for alpha in [4096, 5462, 8192]:
             run_experiments(k=k, alpha=alpha)
 
